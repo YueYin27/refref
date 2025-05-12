@@ -7,6 +7,7 @@
   <a href="https://sites.google.com/view/djcampbell">Dylan Campbell</a>
 </div>
 
+<br>
 
 <p align="center">
   <a href="https://arxiv.org/abs/2505.05848">
@@ -18,7 +19,6 @@
   <img src="https://img.shields.io/badge/Project-Website-blue?logo=google-chrome&logoColor=white" style="height: 27px; margin: 5px;">
 </p>
 
-<br>
 
 ---
 

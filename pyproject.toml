@@ -1,0 +1,52 @@
+[project]
+name = "r3f"
+description = "R3F plugin for creating and registering R3F in nerfstudio."
+version = "0.1.0"
+
+dependencies = [
+    "nerfstudio >= 0.3.0",
+    "numpy",
+    "torch",
+    "absl-py",
+    "accelerate",
+    "datasets",
+    "gin-config",
+    "imageio",
+    "imageio[ffmpeg]",
+    "matplotlib",
+    "mediapy",
+    "opencv-contrib-python",
+    "opencv-python",
+    "Pillow",
+    "trimesh",
+    "pymeshlab",
+    "xatlas",
+    "plyfile",
+    "rawpy",
+    "ninja",
+    "scipy",
+    "scikit-image",
+    "scikit-learn",
+    "tensorboard",
+    "tensorboardX",
+    "tqdm",
+    "gin-config"
+]
+
+[tool.setuptools]
+include-package-data = true
+
+
+[tool.setuptools.packages.find]
+include = ["r3f_ns*","internal*","gridencoder*","extensions*","configs*"]
+
+[tool.setuptools.package-data]
+configs = ["*.gin"]
+
+# register the entry point of your new method here:
+[project.entry-points.'nerfstudio.method_configs']
+r3f_ns = 'r3f_ns.r3f_config:r3f_method'
+
+# register the entry point of your new dataparser here:
+[project.entry-points.'nerfstudio.dataparser_configs']
+refref-data = 'r3f_ns.refref_dataparser_config:refref_dataparser'

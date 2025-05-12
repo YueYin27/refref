@@ -1,0 +1,16 @@
+Config.exp_name = 'test'
+Config.dataset_loader = 'blender'
+Config.near = 0.05
+Config.far = 15
+Config.factor = 0
+Config.distortion_loss_mult = 0.01
+
+Model.raydist_fn = 'power_transformation'
+Model.opaque_background = True
+
+PropMLP.disable_density_normals = True
+PropMLP.disable_rgb = True
+PropMLP.grid_level_dim = 1
+
+NerfMLP.disable_density_normals = True
+

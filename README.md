@@ -12,16 +12,15 @@
 <p align="center">
   <a href="https://arxiv.org/abs/2505.05848">
     <img src="https://img.shields.io/badge/Paper-arXiv-red?logo=arxiv&logoColor=white" style="height: 27px; margin: 5px;">
-  </a>
+  </a>&nbsp;
   <a href="https://huggingface.co/datasets/yinyue27/RefRef">
     <img src="https://img.shields.io/badge/Dataset-HuggingFace-yellow?logo=huggingface&logoColor=white" style="height: 27px; margin: 5px;">
-  </a>
+  </a>&nbsp;
   <img src="https://img.shields.io/badge/Project-Website-blue?logo=google-chrome&logoColor=white" style="height: 27px; margin: 5px;">
 </p>
 
 
----
-
+<br><br>
 
 
 ## ✨ Overview

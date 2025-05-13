@@ -80,9 +80,8 @@ This repository provides both a synthetic dataset and a novel method for reconst
 2. **Automatic Loading**: Images and camera poses auto-downloaded when you run `ns-train` or `ns-eval`. Just specify the `scene-name` from the list above.
 
 3. **Manual Step (Required)**:  
-You must download the corresponding `.ply` mesh file locally:  
+You must download the corresponding `.ply` mesh file locally, which are in mesh_files.zip: 
     ```bash
-    # Example: Download cube mesh
     wget https://huggingface.co/datasets/yinyue27/RefRef_additional/blob/main/mesh_files.zip -O ./mesh_files.zip
     ```
 

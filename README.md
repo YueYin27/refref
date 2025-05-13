@@ -34,17 +34,20 @@ This repository provides both a synthetic dataset and a novel method for reconst
 
 ### 🛠️ Setup the Environment
 
-1. **Install [nerfstudio](https://github.com/nerfstudio-project/nerfstudio):**
+1. **Create a conda environment** (optional but recommended):
+   ```bash
+   conda create --name r3f -y python=3.8
+   conda activate r3f
+   ```
+2. **Install [nerfstudio](https://github.com/nerfstudio-project/nerfstudio):**
 
       You can simply install nerfstudio using pip:
       ```bash
       pip install nerfstudio
       ```
-      or install it from source, detailed instructions can be found [here](https://github.com/nerfstudio-project/nerfstudio#1-installation-setup-the-environment). Here, we also provide a quick installation script for your convenience:
+      or install it from source, detailed instructions can be found [here](https://github.com/nerfstudio-project/nerfstudio#1-installation-setup-the-environment).
+      We also provide a quick installation script for your convenience with tested versions:
       ```bash
-      conda create --name nerfstudio -y python=3.8
-      conda activate nerfstudio
-        
       pip install --upgrade pip
       pip install torch==2.0.1+cu117 torchvision==0.15.2+cu117 --extra-index-url https://download.pytorch.org/whl/cu117
       conda install -y -c "nvidia/label/cuda-11.7.1" cuda-toolkit
@@ -57,7 +60,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
       pip install -e .
       ```
 
-2. **Clone this repository and install dependencies:**
+3. **Clone this repository and install dependencies:**
       ```bash
       git clone https://github.com/YueYin27/refref.git
       cd refref
@@ -65,8 +68,9 @@ This repository provides both a synthetic dataset and a novel method for reconst
       pip install torch-scatter -f https://data.pyg.org/whl/torch-2.0.1+cu117.html
       ```
 
-3. **Verify the install by running the help command for our training script:**
+4. **Verify the installation by running the help command for our training script:**
       ```bash
+      ns-train r3f --help
       ns-train r3f refref-data --help
       ```
 

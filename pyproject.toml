@@ -5,6 +5,7 @@ version = "0.1.0"
 
 dependencies = [
     "nerfstudio >= 0.3.0",
+    "tyro==0.6.6",
     "numpy",
     "torch",
     "absl-py",

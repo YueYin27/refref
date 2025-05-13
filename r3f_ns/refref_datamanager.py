@@ -38,7 +38,6 @@ from nerfstudio.data.utils.dataloaders import (
     CacheDataloader,
     FixedIndicesEvalDataloader,
     RandIndicesEvalDataloader,
-    variable_res_collate,
 )
 from nerfstudio.model_components.ray_generators import RayGenerator
 from nerfstudio.utils.rich_utils import CONSOLE

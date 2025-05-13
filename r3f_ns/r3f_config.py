@@ -32,7 +32,8 @@ from r3f_ns.r3f_pipeline import (
     R3FPipelineConfig,
 )
 from nerfstudio.configs.base_config import ViewerConfig
-from nerfstudio.data.dataparsers.colmap_dataparser import ColmapDataParserConfig
+# from nerfstudio.data.dataparsers.colmap_dataparser import ColmapDataParserConfig
+from r3f_ns.refref_dataparser import RefRefDataParserConfig
 from nerfstudio.engine.optimizers import AdamOptimizerConfig
 from nerfstudio.engine.schedulers import (
     ExponentialDecaySchedulerConfig,
@@ -52,7 +53,7 @@ r3f_method = MethodSpecification(
         log_gradients=False,
         pipeline=R3FPipelineConfig(
             datamanager=RefRefDataManagerConfig(
-                dataparser=ColmapDataParserConfig(downscale_factor=4,orientation_method="up",center_method="poses", colmap_path="sparse/0"),
+                dataparser=RefRefDataParserConfig,
                 train_num_rays_per_batch=8192,
                 eval_num_rays_per_batch=8192,
             ),
@@ -71,5 +72,5 @@ r3f_method = MethodSpecification(
         viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
         vis="viewer",
     ),
-    description="An unofficial pytorch implementation of 'Zip-NeRF: Anti-Aliased Grid-Based Neural Radiance Fields' https://arxiv.org/abs/2304.06706. ",
+    description="A PyTprch implementation of RefRef: A Synthetic Dataset and Benchmark for Reconstructing Refractive and Reflective Objects (https://arxiv.org/abs/2505.05848). ",
 )

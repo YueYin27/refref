@@ -83,7 +83,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
 You must download the corresponding `.ply` mesh file locally:  
     ```bash
     # Example: Download cube mesh
-    wget https://huggingface.co/datasets/yinyue27/RefRef/resolve/main/mesh_files/single-material_convex/cube.ply -O ./mesh_files/cube.ply
+    wget https://huggingface.co/datasets/yinyue27/RefRef_additional/blob/main/mesh_files.zip -O ./mesh_files.zip
     ```
 
 ### 🔄 Example for Optimizing a Scene

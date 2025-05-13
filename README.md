@@ -59,8 +59,8 @@ This repository provides both a synthetic dataset and a novel method for reconst
 
 2. **Clone this repository and install dependencies:**
       ```bash
-      git clone https://github.com/YueYin27/r3f-refref.git
-      cd RefRef
+      git clone https://github.com/YueYin27/refref.git
+      cd refref
       pip install -e .
       pip install torch-scatter -f https://data.pyg.org/whl/torch-2.0.1+cu117.html
       ```

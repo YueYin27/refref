@@ -32,7 +32,6 @@ from r3f_ns.r3f_pipeline import (
     R3FPipelineConfig,
 )
 from nerfstudio.configs.base_config import ViewerConfig
-# from nerfstudio.data.dataparsers.colmap_dataparser import ColmapDataParserConfig
 from r3f_ns.refref_dataparser import RefRefDataParserConfig
 from nerfstudio.engine.optimizers import AdamOptimizerConfig
 from nerfstudio.engine.schedulers import (

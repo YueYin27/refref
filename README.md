@@ -209,33 +209,31 @@ This repository provides both a synthetic dataset and a novel method for reconst
    }
    
    @misc{barron2023zipnerf,
-      title={Zip-NeRF: Anti-Aliased Grid-Based Neural Radiance Fields}, 
-      author={Jonathan T. Barron and Ben Mildenhall and Dor Verbin and Pratul P. Srinivasan and Peter Hedman},
-      year={2023},
-      eprint={2304.06706},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV}
+        title={Zip-NeRF: Anti-Aliased Grid-Based Neural Radiance Fields}, 
+        author={Jonathan T. Barron and Ben Mildenhall and Dor Verbin and Pratul P. Srinivasan and Peter Hedman},
+        year={2023},
+        eprint={2304.06706},
+        archivePrefix={arXiv},
+        primaryClass={cs.CV}
    }
    
    @inproceedings{nerfstudio,
-	title        = {Nerfstudio: A Modular Framework for Neural Radiance Field Development},
-	author       = {
-		Tancik, Matthew and Weber, Ethan and Ng, Evonne and Li, Ruilong and Yi, Brent
-		and Kerr, Justin and Wang, Terrance and Kristoffersen, Alexander and Austin,
-		Jake and Salahi, Kamyar and Ahuja, Abhik and McAllister, David and Kanazawa,
-		Angjoo
-	},
-	year         = 2023,
-	booktitle    = {ACM SIGGRAPH 2023 Conference Proceedings},
-	series       = {SIGGRAPH '23}
+        title={Nerfstudio: A Modular Framework for Neural Radiance Field Development},
+        author={Tancik, Matthew and Weber, Ethan and Ng, Evonne and Li, Ruilong and Yi, Brent
+                and Kerr, Justin and Wang, Terrance and Kristoffersen, Alexander and Austin,
+                Jake and Salahi, Kamyar and Ahuja, Abhik and McAllister, David and Kanazawa,
+                Angjoo},
+        year=2023,
+        booktitle={ACM SIGGRAPH 2023 Conference Proceedings},
+        series={SIGGRAPH '23}
     }
     
     @misc{Yu2022SDFStudio,
-    author    = {Yu, Zehao and Chen, Anpei and Antic, Bozidar and Peng, Songyou and Bhattacharyya, Apratim 
-                 and Niemeyer, Michael and Tang, Siyu and Sattler, Torsten and Geiger, Andreas},
-    title     = {SDFStudio: A Unified Framework for Surface Reconstruction},
-    year      = {2022},
-    url       = {https://github.com/autonomousvision/sdfstudio},
+        author={Yu, Zehao and Chen, Anpei and Antic, Bozidar and Peng, Songyou and Bhattacharyya, Apratim 
+                and Niemeyer, Michael and Tang, Siyu and Sattler, Torsten and Geiger, Andreas},
+        title={SDFStudio: A Unified Framework for Surface Reconstruction},
+        year={2022},
+        url={https://github.com/autonomousvision/sdfstudio},
     }
    ```
 

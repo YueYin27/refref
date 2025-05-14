@@ -126,7 +126,7 @@ class R3FModel(Model):
     def construct_batch_from_raybundle(self, ray_bundle):
         batch = {}
         batch['origins'] = ray_bundle.origins
-        batch['directions'] = ray_bundle.directions * ray_bundle.metadata["directions_norm"]
+        batch['directions'] = ray_bundle.directions
         batch['viewdirs'] = ray_bundle.directions
         batch['radii'] = torch.sqrt(ray_bundle.pixel_area)* 2 / torch.sqrt(torch.full_like(ray_bundle.pixel_area,12.))
         batch['cam_idx'] = ray_bundle.camera_indices
@@ -165,18 +165,6 @@ class R3FModel(Model):
             zero_glo=self.config.zero_glo if self.training else True,  # set to True when evaluating or rendering
             reflection=rfls,)  # set to True when rendering reflection, False when rendering refraction
 
-        if not self.training:
-            renderings_depth = renderings
-        else:
-            renderings_straight, _, _, _, _ = self.r3f(
-                rand=self.config.rand if self.training else False,  # set to false when evaluating or rendering
-                batch=batch,
-                train_frac=anneal_frac,
-                compute_extras=self.config.compute_extras,
-                zero_glo=self.config.zero_glo if self.training else True,  # set to True when evaluating or rendering
-                straight=True,)
-            renderings_depth = renderings_straight
-
         # Fresnel equation
         ray_samples_rfl = rfls[-1]
         normals = ray_samples_rfl.normals
@@ -191,8 +179,7 @@ class R3FModel(Model):
 
         # showed by viewer
         outputs['rgb']=renderings[2]['rgb']
-        # outputs['depth']=renderings[2]['depth'].unsqueeze(-1)
-        outputs['depth']=renderings_depth[2]['depth'].unsqueeze(-1)
+        outputs['depth']=renderings[2]['depth'].unsqueeze(-1)
         outputs['accumulation']=renderings[2]['acc']
         if self.config.compute_extras:
             outputs['distance_mean']=renderings[2]['distance_mean']

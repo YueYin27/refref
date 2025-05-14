@@ -151,14 +151,7 @@ class R3FPipeline(VanillaPipeline):
                 height, width = camera_ray_bundle.shape
                 num_rays = height * width
                 metrics_dict, images_dict = self.model.get_image_metrics_and_images(outputs, batch)
-                # if output_path is not None:
-                #     for key in image_dict.keys():
-                #         image = image_dict[key]  # [H, W, C] order
-                #         vutils.save_image(
-                #             image.permute(2, 0, 1).cpu(), output_path / f"{image_prefix}_{key}_{idx:04d}.png"
-                #         )
-                # save depth map (replace transform_train/val.json to transform_test.json to get res on train/val set)
-                #
+
                 new_max = 11.5  # the max depth value in the dataset
                 new_min = 1.0  # the min depth value in the dataset
                 old_max = 1  # the max depth value in the depth map
@@ -177,10 +170,10 @@ class R3FPipeline(VanillaPipeline):
                 # convert predicted distance map to world coordinate
                 distance_pred = images_dict["depth"].to(torch.float64)  # predicted distance map in world coordinate before scaling
                 distance_pred /= self.scale_factor  # predicted distance map in world coordinate
-                distance_pred *= directions_norm ** 2  # convert depth to distance map
+                distance_pred *= directions_norm * 2  # convert depth to distance map
 
-                # # ONLY FOR ORACLE AND PYTHIA
-                distance_pred = torch.where(mask == 1, distance_gt, distance_pred)
+                # TODO: add GT mask for oracle and stage-1 mask for R3F
+                # distance_pred = torch.where(mask == 1, distance_gt, distance_pred)
 
                 metrics_dict["distance_l1"] = torch.nn.functional.l1_loss(distance_gt, distance_pred)
 

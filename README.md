@@ -240,8 +240,13 @@ This repository provides both a synthetic dataset and a novel method for reconst
 <br>
 
 ## 🙏 Acknowledgements
-Our project is built on the [Nerfstudio](https://github.com/nerfstudio-project/nerfstudio) framework, and [an pytorch implementation of ZipNeRF](https://github.com/SuLvXiangXin/zipnerf-pytorch/tree/main).
-Thanks to [Nerfstudio](https://github.com/nerfstudio-project/nerfstudio) for their great work on the nerfstudio framework, and [ZipNeRF](https://github.com/SuLvXiangXin/zipnerf-pytorch/tree/main) for their great implementation of ZipNeRF.
+Our work builds upon these excellent open-source projects:
+
+- [**ZipNeRF-PyTorch**](https://github.com/SuLvXiangXin/zipnerf-pytorch) -  for providing an efficient and well-structured implementation of ZipNeRF.
+- [**Nerfstudio**](https://github.com/nerfstudio-project/nerfstudio) - for offering a comprehensive and modular framework for NeRF-based research.
+- [**SDFStudio**](https://github.com/autonomousvision/sdfstudio) - for their robust and extensible implementations based on signed distance fields.
+
+We sincerely appreciate all contributors for their valuable work.
 
 <br>
 

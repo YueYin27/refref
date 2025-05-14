@@ -149,7 +149,9 @@ This repository provides both a synthetic dataset and a novel method for reconst
 2. **Stage 2: Optimize a Scene**
     - **Run R3F:**
       ```bash
-      ply_file=./mesh_files/.../cube_est.ply  # Path to your estimated mesh file
+      # Path to your estimated mesh file, if multiple meshes, split them with space
+      ply_file="./mesh_files/.../cube_est.ply"
+      
       ns-train r3f --machine.device-type cuda \
                    --machine.num-devices 1 \
                    --project-name r3f \
@@ -160,7 +162,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
                refref-data \
                    --scene-name "cube_smcvx_cube" \
                    --scale-factor 0.1 \
-                   --ply-path "$ply_file"
+                   --ply-path $ply_file
       ```
     - **Run Oracle:**
       ```bash
@@ -169,7 +171,9 @@ This repository provides both a synthetic dataset and a novel method for reconst
       unzip mesh_files.zip
       
       # Run Oracle
-      ply_file=./mesh_files/.../cube_gt.ply  # Path to your ground truth mesh file
+      # Path to your ground truth mesh file, if multiple meshes, split them with space
+      ply_file="./mesh_files/.../cube_gt.ply"
+      
       ns-train r3f --machine.device-type cuda \
                    --machine.num-devices 1 \
                    --project-name oracle \
@@ -180,7 +184,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
                refref-data \
                    --scene-name "cube_smcvx_cube" \
                    --scale-factor 0.1 \
-                   --ply-path "$ply_file"
+                   --ply-path $ply_file
       ```
 
 ### 📊 Evaluate an Optimized Scene

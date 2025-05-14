@@ -19,6 +19,7 @@
   <img src="https://img.shields.io/badge/Project-Website-blue?logo=google-chrome&logoColor=white" style="height: 27px; margin: 5px;">
 </p>
 
+<br>
 
 ## ✨ Overview
 This repository provides both a synthetic dataset and a novel method for reconstructing scenes with refractive and reflective objects from posed images:
@@ -26,6 +27,8 @@ This repository provides both a synthetic dataset and a novel method for reconst
 - **RefRef Dataset**: 150 high-quality synthetic scenes containing reflective and refractive objects;  
 - **Oracle Method**: a method that models light paths using ground-truth object geometry and refractive indices;
 - **R3F (Refractive–Reflective Radiance Field)**: a method that relaxes these requirements by estimating and smoothing the object geometry.  
+
+<br>
 
 ## 🚀 Quickstart
 
@@ -88,7 +91,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
 2. **Automatic Loading**: Images and camera poses auto-downloaded when you run `ns-train` or `ns-eval`. Just specify the `scene-name` from the list above.
 
 
-### 🔄 Example for Optimizing a Scene
+### 🔄 Optimize a Scene
 
 1. **Stage-1: Estimate and smooth the object geometry**
    - <details>
@@ -180,7 +183,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
                    --ply-path "$ply_file"
       ```
 
-### 📊 Example for Evaluating an Optimized Scene
+### 📊 Evaluate an Optimized Scene
    ```bash
    # Path to your output checkpoint folder
    config_path=./outputs/.../config.yml  # Path to your output config file
@@ -190,6 +193,8 @@ This repository provides both a synthetic dataset and a novel method for reconst
            --output-path $output_path \
            --render-output-path $output_img_dir
    ```
+
+<br>
 
 ## 📑 Citation  
    ```bibtex
@@ -234,10 +239,13 @@ This repository provides both a synthetic dataset and a novel method for reconst
     }
    ```
 
+<br>
+
 ## 🙏 Acknowledgements
 Our project is built on the [Nerfstudio](https://github.com/nerfstudio-project/nerfstudio) framework, and [an pytorch implementation of ZipNeRF](https://github.com/SuLvXiangXin/zipnerf-pytorch/tree/main).
 Thanks to [Nerfstudio](https://github.com/nerfstudio-project/nerfstudio) for their great work on the nerfstudio framework, and [ZipNeRF](https://github.com/SuLvXiangXin/zipnerf-pytorch/tree/main) for their great implementation of ZipNeRF.
 
+<br>
 
 ## ⚖️ License
 This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.

@@ -41,10 +41,6 @@ from abc import abstractmethod
 from typing import Any, Callable, List, Optional, Protocol, Tuple, Union
 from nerfacc import OccGridEstimator
 
-TORCH_DEVICE = Union[str, torch.device]
-n_dict = {'air': 1.0, 'glass': 1.5, 'water': 1.333}
-
-IoR = 1.5
 
 @dataclass
 class RaySamples(TensorDataclass):
@@ -80,14 +76,14 @@ class RaySamples(TensorDataclass):
             pos = pos + self.offsets
         return pos
 
-    def get_refracted_rays_multi(self, scene_dict: dict):
+    def get_refracted_rays(self, scene_dict: dict):
         scene = scene_dict['scene']
         iors = scene_dict['iors'].to(self.origins.device)
 
         # 1. Get origins, directions, r1, r2
-        origins = self.origins.clone()  # [4096, 256, 3]
-        directions = self.directions.clone()  # [4096, 256, 3]
-        positions = self.get_positions()  # [4096, 256, 3] ([num_rays_per_batch, num_samples_per_ray, 3])
+        origins = self.origins.clone()
+        directions = self.directions.clone()
+        positions = self.get_positions()  # [num_rays_per_batch, num_samples_per_ray, 3]
         epsilon = 1e-4
         num_samples_per_ray = self.origins.shape[1]
 
@@ -97,22 +93,22 @@ class RaySamples(TensorDataclass):
         updated_origins_list = []
         updated_directions_list = []
         indices_list = []
-        indices = torch.arange(origins.shape[0], device=origins.device)  # a tensor of indices from 0 to 4095
+        indices = torch.arange(origins.shape[0], device=origins.device)
 
         # 2. Get intersections and normals through the first refraction
         ray_refraction = MeshRefraction(origins, directions, positions)
-        intersections, normals, mask, indices, mesh_idx = ray_refraction.get_intersections_and_normals(scene, origins, directions, indices)  # [4096, 256, 3]
+        intersections, normals, mask, indices, mesh_idx = ray_refraction.get_intersections_and_normals(scene, origins, directions, indices)
         normals_first = normals.clone()
 
         n = iors[mesh_idx]
         r = 1.0 / n # initialise r, assuming the ray starts from air
         ray_refraction.r = r  # update r for this refraction
 
-        directions_new, mask_tir = ray_refraction.snell_fn(normals, directions)  # [4096, 256, 3]
-        distance = torch.norm(origins - intersections, dim=-1)  # [4096, 256]
-        origins_new = intersections - directions_new * distance.unsqueeze(-1)  # [4096, 256, 3]
+        directions_new, mask_tir = ray_refraction.snell_fn(normals, directions)
+        distance = torch.norm(origins - intersections, dim=-1)
+        origins_new = intersections - directions_new * distance.unsqueeze(-1)
         updated_origins, updated_directions, updated_positions, mask_update_first = ray_refraction.update_sample_points(
-            intersections, origins_new, directions_new, mask)  # [4096, 256, 3], [4096, 256, 3], [4096, 256, 3], [4096, 256]
+            intersections, origins_new, directions_new, mask)
 
         intersections_list.append(intersections)
         mask_list.append(mask)
@@ -165,8 +161,8 @@ class RaySamples(TensorDataclass):
             i += 1
 
             # Calculate the number of non-NaN elements in the intersections tensor
-            rows_with_non_nan = ~torch.isnan(intersections).any(dim=2)  # [4096, 256]
-            rows_with_non_nan = rows_with_non_nan.any(dim=1)  # [4096]
+            rows_with_non_nan = ~torch.isnan(intersections).any(dim=2)
+            rows_with_non_nan = rows_with_non_nan.any(dim=1)
             num_non_nan_rows = rows_with_non_nan.sum().item()
 
             # Break the loop if no more intersections are found
@@ -189,15 +185,15 @@ class RaySamples(TensorDataclass):
         return intersections_list, normals_first, mask_update_first
 
     def get_reflected_rays(self, intersections, normals, masks) -> None:
-        origins = self.origins.clone()  # [4096, 256, 3]
-        directions = self.directions.clone()  # [4096, 256, 3]
-        positions = self.get_positions()  # [4096, 256, 3]
+        origins = self.origins.clone()
+        directions = self.directions.clone()
+        positions = self.get_positions()
         intersections, normals, mask = intersections.clone(), normals.clone(), masks.clone()
 
         # 1) Get reflective directions
         ray_reflection = RayReflection(origins, directions, positions)
         directions_new = ray_reflection.get_reflected_directions(normals)
-        distance = torch.norm(origins - intersections, dim=-1)  # [4096, 256]
+        distance = torch.norm(origins - intersections, dim=-1)
         origins_new = intersections - directions_new * distance.unsqueeze(-1)
         updated_origins, updated_directions = ray_reflection.update_sample_points(intersections, origins_new, directions_new, mask)
         # 2) Update ray_samples.frustums.directions

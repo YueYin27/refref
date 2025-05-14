@@ -21,39 +21,6 @@ import plotly.graph_objects as go
 import torch
 
 
-def visualization(ray_samples, idx_start, idx_end) -> None:
-    positions = ray_samples.frustums.get_positions()
-    # radius = 0.9
-    radius = 1.0 * 0.1
-    for i in range(idx_start, idx_end):
-        p = positions[i, ...]
-        x = p[..., 0].flatten().cpu().numpy()
-        y = p[..., 1].flatten().cpu().numpy()
-        z = p[..., 2].flatten().cpu().numpy()
-        # Create a meshgrid of points on the sphere's surface
-        theta = np.linspace(0, 2 * np.pi, 100)
-        phi = np.linspace(0, np.pi, 100)
-        theta, phi = np.meshgrid(theta, phi)
-        xs = radius * np.sin(phi) * np.cos(theta)
-        ys = radius * np.sin(phi) * np.sin(theta)
-        zs = radius * np.cos(phi)
-        scatter_trace = go.Scatter3d(x=x, y=y, z=z, mode='markers', marker=dict(size=5))
-        line_trace = go.Scatter3d(x=x, y=y, z=z, mode='lines', line=dict(color='blue'))
-        o = ray_samples.frustums.origins[i].cpu()
-        origins = go.Scatter3d(x=o[..., 0], y=o[..., 1], z=o[..., 2], mode='markers', marker=dict(size=5))
-        surface_trace = go.Surface(x=xs, y=ys, z=zs, opacity=0.3)
-        fig = go.Figure(data=[scatter_trace, line_trace, origins, surface_trace])
-        fig.update_layout(scene=dict(aspectmode='data', aspectratio=dict(x=1, y=1, z=1)))
-        # fig.show()
-
-        file_name = f"visualization_{i}.html"
-        full_path = os.path.join('logs', file_name)
-        fig.write_html(full_path)
-
-    import sys
-    sys.exit(0)
-
-
 class RayRefraction:
     """Ray refracting
 
@@ -86,7 +53,7 @@ class RayRefraction:
 
         r = self.r
         l = self.directions / torch.norm(self.directions, p=2, dim=-1,
-                                         keepdim=True)  # Normalize ray directions [4096, 256, 3]
+                                         keepdim=True)  # Normalize ray directions
         c = -torch.einsum('ijk, ijk -> ij', n, l)  # Cosine of the angle between the surface normal and ray direction
         sqrt_term = 1 - (r ** 2) * (1 - c ** 2)
         total_internal_reflection_mask = sqrt_term < 1e-6  # Check for total internal reflection (sqrt_term <= 0)
@@ -143,7 +110,7 @@ class MeshRefraction(RayRefraction):
         mesh_idx = torch.tensor(results["geometry_ids"].cpu().numpy().astype(np.int32), device=device)[:, 0]
 
         # check if the intersection is not 'inf' and create a mask for valid intersections and normals
-        mask = ~torch.isinf(t_hit).any(dim=-1)  # [4096, 256]
+        mask = ~torch.isinf(t_hit).any(dim=-1)
         mask[:, :] = mask[:, 0].unsqueeze(1).expand(-1, mask.shape[1])  # make sure each ray has the same mask
         intersections = torch.where(mask.unsqueeze(-1), intersections, torch.tensor(float('nan'), device=device))  # mask the invalid intersections
         normals = torch.where(mask.unsqueeze(-1), normals, torch.tensor(float('nan'), device=device))  # mask the invalid normals
@@ -164,21 +131,18 @@ class MeshRefraction(RayRefraction):
             directions_new: refracted directions
             mask: -
         """
-        # distances = torch.norm(intersections - self.positions, dim=-1)  # Calculate Euclidean distances [4096, 256]
-        # first_idx = torch.argmin(distances, dim=-1)  # [4096]
-
-        # 1. Calculate Euclidean distances [4096, 256]
+        # 1. Calculate Euclidean distances
         distances = torch.norm(intersections - self.positions, dim=-1)
 
         # Get the indices of the two smallest distances along axis -1
-        top2_indices = torch.topk(distances, 2, largest=False, dim=-1).indices  # [4096, 2]
-        top1_idx = top2_indices[:, 0]  # [4096]
-        top2_idx = top2_indices[:, 1]  # [4096]
+        top2_indices = torch.topk(distances, 2, largest=False, dim=-1).indices
+        top1_idx = top2_indices[:, 0]
+        top2_idx = top2_indices[:, 1]
         first_idx = torch.max(top1_idx, top2_idx)  # get the latter index
 
         # 2. Get the mask of all samples to be updated
-        first_idx = first_idx.unsqueeze(1)  # [4096, 1]
-        mask = (~torch.isnan(intersections).any(dim=2) & ~torch.isnan(directions_new).any(dim=2)) & mask  # [4096, 256]
+        first_idx = first_idx.unsqueeze(1)
+        mask = (~torch.isnan(intersections).any(dim=2) & ~torch.isnan(directions_new).any(dim=2)) & mask
         mask = mask & (torch.arange(self.positions.shape[1], device=self.positions.device).unsqueeze(0) >= first_idx)
 
         # 3. Move the original sample points onto the refracted ray
@@ -203,20 +167,20 @@ class MeshRefraction(RayRefraction):
             refracted directions or reflected directions in case of total internal reflection
         """
 
-        r = self.r  # a tensor of shape [4096]
-        l = l / torch.norm(l, p=2, dim=-1, keepdim=True)  # Normalize ray directions [4096, 256, 3]
-        c = -torch.einsum('ijk, ijk -> ij', n, l)  # Cosine between normals and directions [4096, 256]
+        r = self.r
+        l = l / torch.norm(l, p=2, dim=-1, keepdim=True)  # Normalize ray directions
+        c = -torch.einsum('ijk, ijk -> ij', n, l)  # Cosine between normals and directions
 
         # Adjust r's shape for broadcasting
-        sqrt_term = 1 - (r[:, None] ** 2) * (1 - c ** 2)  # [4096, 256]
-        total_internal_reflection_mask = sqrt_term <= 0  # [4096, 256]
+        sqrt_term = 1 - (r[:, None] ** 2) * (1 - c ** 2)
+        total_internal_reflection_mask = sqrt_term <= 0
 
-        # create a [4096] mask to check if this is a total internal reflection
-        tir_mask = total_internal_reflection_mask.any(dim=-1)  # [4096], True if there is TIR
+        # create a mask to check if this is a total internal reflection
+        tir_mask = total_internal_reflection_mask.any(dim=-1)  # True if there is TIR
 
         # Refracted directions for non-total-internal-reflection cases
         refracted_directions = r[:, None, None] * l + (r[:, None] * c - torch.sqrt(torch.clamp(sqrt_term, min=0))
-                                                      )[:, :, None] * n  # [4096, 256, 3]
+                                                      )[:, :, None] * n
         refracted_directions = torch.nn.functional.normalize(refracted_directions, dim=-1)
 
         # Total internal reflection case
@@ -228,31 +192,3 @@ class MeshRefraction(RayRefraction):
                                         refracted_directions)
 
         return result_directions, tir_mask
-
-    def tir_update_fn(self, normal, l, mask_inter, n_prev, n_init):
-        """Get total internal reflection mask based on Snell's Law.
-
-        Args:
-            normal: surface normals
-        Returns:
-            total internal reflection mask
-        """
-        n_dict = {'air': 1.0, 'glass': 1.5, 'water': 1.33}
-
-        # Determine the next medium assuming there's no TIR
-        case1 = torch.logical_and(n_prev == n_dict['glass'], ~mask_inter)  # n_curr := water
-        case2 = torch.logical_and(n_prev == n_dict['glass'], mask_inter)  # n_curr := air
-        case3 = torch.logical_and(n_prev == n_dict['water'], ~mask_inter)  # n_curr := air
-        n_curr = torch.where(case1, n_dict['water'], n_init)
-        n_curr = torch.where(torch.logical_or(case2, case3), n_dict['air'], n_curr)
-
-        self.r = n_prev / n_curr
-
-        r = self.r  # a tensor of shape [4096]
-        l = l / torch.norm(l, p=2, dim=-1, keepdim=True)  # Normalize ray directions [4096, 256, 3]
-        c = -torch.einsum('ijk, ijk -> ij', normal, l)  # Cosine between normals and directions [4096, 256]
-        sqrt_term = 1 - (r[:, None] ** 2) * (1 - c ** 2)  # [4096, 256]
-        total_internal_reflection_mask = sqrt_term <= 0  # [4096, 256]
-        tir_mask = total_internal_reflection_mask.any(dim=-1)  # [4096]
-
-        return tir_mask

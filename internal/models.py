@@ -234,36 +234,27 @@ class Model(nn.Module):
             origins = batch['origins'].unsqueeze(1).expand(-1, tdist.shape[1]-1, -1)  # [8192, 64, 3]
             directions = batch['directions'].unsqueeze(1).expand(-1, tdist.shape[1]-1, -1)  # [8192, 64, 3]
 
-            if not straight:
-                if reflection is None:  # refraction pass
-                    # Get refracted origins and directions, reflect origins and directions
-                    ray_samples = ray_samplers.RaySamples(
-                        origins=origins,
-                        directions=directions,
-                        starts=tdist[..., :-1, None],
-                        ends=tdist[..., 1:, None],
-                    )
-                    intersections_list, normals, mask_update = ray_samples.get_refracted_rays_multi(scene)
-
-                    ray_samples_rfl = ray_samplers.RaySamples(
-                        origins=origins,
-                        directions=directions,
-                        starts=tdist[..., 1:, None],
-                        ends=tdist[..., :-1, None],
-                    )
-                    ray_samples_rfl.get_reflected_rays(intersections_list[0], normals, mask_update)
-                    rfls.append(ray_samples_rfl)
-
-                else:  # reflection pass
-                    ray_samples = reflection[i_level]
-
-            else:  # straight pass
+            if reflection is None:  # refraction pass
+                # Get refracted origins and directions, reflect origins and directions
                 ray_samples = ray_samplers.RaySamples(
                     origins=origins,
                     directions=directions,
                     starts=tdist[..., :-1, None],
                     ends=tdist[..., 1:, None],
                 )
+                intersections_list, normals, mask_update = ray_samples.get_refracted_rays(scene)
+
+                ray_samples_rfl = ray_samplers.RaySamples(
+                    origins=origins,
+                    directions=directions,
+                    starts=tdist[..., 1:, None],
+                    ends=tdist[..., :-1, None],
+                )
+                ray_samples_rfl.get_reflected_rays(intersections_list[0], normals, mask_update)
+                rfls.append(ray_samples_rfl)
+
+            else:  # reflection pass
+                ray_samples = reflection[i_level]
 
             # Cast our rays, by turning our distance intervals into Gaussians.
             means, stds, ts = render.cast_rays_ref(
@@ -280,10 +271,7 @@ class Model(nn.Module):
             mlp = (self.get_submodule(
                 f'prop_mlp_{i_level}') if self.distinct_prop else self.prop_mlp) if is_prop else self.nerf_mlp
 
-            if not straight:
-                refdirs = reflection[i_level].directions if reflection else ray_samples_rfl.directions
-            else:
-                refdirs = None
+            refdirs = reflection[i_level].directions if reflection else ray_samples_rfl.directions
 
             ray_results = mlp(
                 rand,

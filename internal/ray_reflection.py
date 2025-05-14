@@ -40,9 +40,9 @@ class RayReflection:
         Returns:
             directions: reflected directions (unit vector)
         """
-        l = self.directions  # [4096, 256, 3]
-        l = l / torch.norm(l, p=2, dim=-1, keepdim=True)  # Normalize ray directions [4096, 256, 3]
-        c = -torch.einsum('ijk, ijk -> ij', n, l)  # Cosine between normals and directions [4096, 256]
+        l = self.directions
+        l = l / torch.norm(l, p=2, dim=-1, keepdim=True)  # Normalize ray directions
+        c = -torch.einsum('ijk, ijk -> ij', n, l)  # Cosine between normals and directions
 
         # Calculate the reflected direction
         reflected_directions = l + 2 * c.unsqueeze(-1) * n
@@ -59,7 +59,7 @@ class RayReflection:
             R: fraction of reflection
         """
         r = self.r  # n1/n2
-        l = self.directions  # [4096, 48, 3]
+        l = self.directions
         # Calculate the cosine of the angle of incidence
         cos_theta_i = -torch.einsum('ij,ij->i', l[:, 0, :], normals[:, 0, :])
         cos_theta_i = torch.clamp(cos_theta_i, -1.0, 1.0)  # Ensure values are within valid range

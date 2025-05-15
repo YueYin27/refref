@@ -212,14 +212,13 @@ This repository provides both a synthetic dataset and a novel method for reconst
          url={https://arxiv.org/abs/2505.05848}, 
    }
    
-   @misc{barron2023zipnerf,
-        title={Zip-NeRF: Anti-Aliased Grid-Based Neural Radiance Fields}, 
-        author={Jonathan T. Barron and Ben Mildenhall and Dor Verbin and Pratul P. Srinivasan and Peter Hedman},
-        year={2023},
-        eprint={2304.06706},
-        archivePrefix={arXiv},
-        primaryClass={cs.CV}
-   }
+   @inproceedings{barron2023zip,
+         title={Zip-nerf: Anti-aliased grid-based neural radiance fields},
+         author={Barron, Jonathan T and Mildenhall, Ben and Verbin, Dor and Srinivasan, Pratul P and Hedman, Peter},
+         booktitle={Proceedings of the IEEE/CVF International Conference on Computer Vision},
+         pages={19697--19705},
+         year={2023}
+    }
    
    @inproceedings{nerfstudio,
         title={Nerfstudio: A Modular Framework for Neural Radiance Field Development},

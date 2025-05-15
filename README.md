@@ -95,11 +95,11 @@ This repository provides both a synthetic dataset and a novel method for reconst
 
 1. **Stage-1: Estimate and smooth the object geometry**
    - <details>
-     <summary>Download masks from <a href="https://huggingface.co/datasets/yinyue27/RefRef_additional">this HuggingFace repository</a></summary>
+     <summary>Download masks from the <a href="https://huggingface.co/datasets/yinyue27/RefRef_additional">RefRef_additional</a> repository</summary>
+     e.g. download the cube masks:
      
      ```bash
-     wget https://huggingface.co/datasets/yinyue27/RefRef_additional/blob/main/masks.zip -O ./masks.zip
-     unzip masks.zip
+     wget https://huggingface.co/datasets/yinyue27/RefRef_additional/tree/main/masks/single-convex/cube_mask - O ./masks/cube_mask
      ```
      </details>
    - <details>

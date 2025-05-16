@@ -18,6 +18,7 @@
   </a>&nbsp;
   <a href="https://yueyin27.github.io/refref-page">
   <img src="https://img.shields.io/badge/Project-Website-blue?logo=google-chrome&logoColor=white" style="height: 27px; margin: 5px;">
+  </a>;
 </p>
 
 <br>
@@ -46,6 +47,10 @@ This repository provides both a synthetic dataset and a novel method for reconst
    pip install setuptools==69.5.1
    pip install ninja git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
    ```
+   > ⚠️ Important: This setup guide describes the tested and verified environment. Other configurations may lead to compatibility issues.
+   > CUDA 11.7 requires gcc and g++ versions <= 11.
+   > If needed, you can install a compatible version.
+
 2. **Install [nerfstudio](https://github.com/nerfstudio-project/nerfstudio):**
 
       You can simply install nerfstudio using pip:
@@ -107,7 +112,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
      <summary>Train <a href="https://github.com/autonomousvision/unisurf">UNISURF</a> (we provide a sample script)</summary>
 
       ```bash
-      data_dir=./data/.../cube  # Path to mask images
+      data_dir=./masks/cube_mask  # Path to mask images
       ns-train unisurf --trainer.max-num-iterations 20000 \
                        --pipeline.model.sdf-field.inside-outside False \
                        --pipeline.model.near-plane 0.05 \
@@ -150,7 +155,8 @@ This repository provides both a synthetic dataset and a novel method for reconst
 2. **Stage 2: Optimize a Scene**
     - **Run R3F:**
       ```bash
-      # Path to your estimated mesh file, if multiple meshes, split them with space
+      # Path to your estimated mesh file with material name in the file name
+      # If multiple meshes, split them with space
       ply_file="./mesh_files/.../cube_glass_est.ply"
       
       ns-train r3f --machine.device-type cuda \
@@ -160,6 +166,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
                    --pipeline.model.background-color random \
                    --max-num-iterations 25000 \
                    --output-dir "outputs" \
+                   --vis wandb \
                refref-data \
                    --scene-name "cube_smcvx_cube" \
                    --scale-factor 0.1 \
@@ -167,13 +174,12 @@ This repository provides both a synthetic dataset and a novel method for reconst
       ```
     - **Run Oracle:**
       ```bash
-      # Download the ground truth mesh files
-      wget https://huggingface.co/datasets/yinyue27/RefRef_additional/blob/main/mesh_files.zip -O ./masks.zip
-      unzip mesh_files.zip
+      # Download the ground truth mesh file from the RefRef_additional repository
+      wget https://huggingface.co/datasets/yinyue27/RefRef_additional/blob/main/mesh_files/single-convex/cube_glass.ply -O ./mesh_files/single-convex/cube_glass.ply
       
-      # Run Oracle
-      # Path to your ground truth mesh file, if multiple meshes, split them with space
-      ply_file="./mesh_files/.../cube_glass_gt.ply"
+      # Path to your ground truth mesh file with material name in the file name
+      # If multiple meshes, split them with space
+      ply_file="./mesh_files/single-convex/cube_glass.ply"
       
       ns-train r3f --machine.device-type cuda \
                    --machine.num-devices 1 \
@@ -182,6 +188,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
                    --pipeline.model.background-color random \
                    --max-num-iterations 25000 \
                    --output-dir "outputs" \
+                   --vis wandb \
                refref-data \
                    --scene-name "cube_smcvx_cube" \
                    --scale-factor 0.1 \

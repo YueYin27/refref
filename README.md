@@ -151,7 +151,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
     - **Run R3F:**
       ```bash
       # Path to your estimated mesh file, if multiple meshes, split them with space
-      ply_file="./mesh_files/.../cube_est.ply"
+      ply_file="./mesh_files/.../cube_glass_est.ply"
       
       ns-train r3f --machine.device-type cuda \
                    --machine.num-devices 1 \
@@ -173,7 +173,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
       
       # Run Oracle
       # Path to your ground truth mesh file, if multiple meshes, split them with space
-      ply_file="./mesh_files/.../cube_gt.ply"
+      ply_file="./mesh_files/.../cube_glass_gt.ply"
       
       ns-train r3f --machine.device-type cuda \
                    --machine.num-devices 1 \

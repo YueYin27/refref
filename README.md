@@ -104,7 +104,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
      ```
      </details>
    - <details>
-     <summary>Train <a href="https://github.com/autonomousvision/unisurf">UNISURF</a> (we provide a sample scripts)</summary>
+     <summary>Train <a href="https://github.com/autonomousvision/unisurf">UNISURF</a> (we provide a sample script)</summary>
 
       ```bash
       data_dir=./data/.../cube  # Path to mask images

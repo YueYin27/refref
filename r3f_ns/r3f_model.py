@@ -168,7 +168,7 @@ class R3FModel(Model):
         # Fresnel equation
         ray_samples_rfl = rfls[-1]
         normals = ray_samples_rfl.normals
-        ray_reflection = RayReflection(ray_samples_rfl.origins, ray_samples_rfl.directions, ray_samples_rfl.get_positions(), 1.0 / 1.5)  # TODO: update n1/n2
+        ray_reflection = RayReflection(ray_samples_rfl.origins, ray_samples_rfl.directions, ray_samples_rfl.get_positions(), 1/self.scene['iors'][0])
         R = ray_reflection.fresnel_fn(normals)  # [8192, 1]
         rgb_rfl, rgb_rfr = renderings_rfl[2]['rgb'], renderings[2]['rgb']
         comp_rgb = R * rgb_rfl + (1 - R) * rgb_rfr

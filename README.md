@@ -1,4 +1,4 @@
-<h1 align="center" style="font-size: 36px; margin-bottom: 10px;">RefRef: A Synthetic Dataset and Benchmark for Reconstructing Refractive and Reflective Objects</h1>
+<h1 align="center" style="font-size: 36px; margin-bottom: 10px;">RefRef: A Dataset and Benchmark for Reconstructing Refractive and Reflective Objects</h1>
 
 <div align="center" style="margin-bottom: 20px;">
   <a href="https://yueyin27.github.io">Yue Yin</a> · 

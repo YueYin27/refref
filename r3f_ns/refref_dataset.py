@@ -79,8 +79,13 @@ class RefRefDataset(InputDataset):
             newsize = (int(width * self.scale_factor), int(height * self.scale_factor))
             pil_image = pil_image.resize(newsize, resample=Image.Resampling.BILINEAR)
         image = np.array(pil_image, dtype="uint8")  # shape is (h, w) or (h, w, 3 or 4)
+        # Handle greyscale images: convert to 3 channels by copying the single channel
         if len(image.shape) == 2:
-            image = image[:, :, None].repeat(3, axis=2)
+            # Greyscale image (H, W) -> (H, W, 3)
+            image = np.stack([image, image, image], axis=-1)
+        elif len(image.shape) == 3 and image.shape[2] == 1:
+            # Greyscale image with channel dimension (H, W, 1) -> (H, W, 3)
+            image = np.repeat(image, 3, axis=-1)
         assert len(image.shape) == 3
         assert image.dtype == np.uint8
         assert image.shape[2] in [3, 4], f"Image shape of {image.shape} is in correct."

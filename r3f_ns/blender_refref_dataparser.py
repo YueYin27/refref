@@ -86,8 +86,10 @@ class Blender(DataParser):
         poses = np.array(poses).astype(np.float32)
         img_0 = imageio.v2.imread(image_filenames[0])
         image_height, image_width = img_0.shape[:2]
-        camera_angle_x = float(meta["camera_angle_x"])
-        focal_length = 0.5 * image_width / np.tan(0.5 * camera_angle_x)
+        # camera_angle_x = float(meta["camera_angle_x"])
+        # focal_length = 0.5 * image_width / np.tan(0.5 * camera_angle_x)
+        focal_length_x = float(meta["fl_x"])
+        focal_length_y = float(meta["fl_y"])
 
         cx = image_width / 2.0
         cy = image_height / 2.0
@@ -99,8 +101,8 @@ class Blender(DataParser):
 
         cameras = Cameras(
             camera_to_worlds=camera_to_world,
-            fx=focal_length,
-            fy=focal_length,
+            fx=focal_length_x,
+            fy=focal_length_y,
             cx=cx,
             cy=cy,
             camera_type=CameraType.PERSPECTIVE,

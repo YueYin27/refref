@@ -63,6 +63,8 @@ class R3FModelConfig(ModelConfig):
     """if True, when using GLO pass in vector of zeros."""
     background_color: Literal["random", "black", "white"] = "white"
     """Whether to randomize the background color."""
+    stage: Literal["bg", "fg", "none"] = "none"
+    """Training stage: 'bg' trains background only (masking out foreground), 'fg' reserved for future use."""
     _target: Type = field(default_factory=lambda: R3FModel)
 
 class R3FModel(Model):
@@ -89,7 +91,7 @@ class R3FModel(Model):
         scene = o3d.t.geometry.RaycastingScene()  # initialize a scene
         mesh_files = str(self.kwargs['ply_path']).split()
         self.scene = None
-        if mesh_files:
+        if mesh_files and self.config.stage != "bg":
             material_list = [
                 next((word for word in path.split('_') if word in ior_map), path.split('_')[-1].replace('.ply', ''))
                 for path in mesh_files
@@ -148,42 +150,56 @@ class R3FModel(Model):
             anneal_frac = 1.0
         batch = self.construct_batch_from_raybundle(ray_bundle)
 
-        renderings, ray_history, rfls, ray_results, ray_samples = self.r3f(
-                rand=self.config.rand if self.training else False,  # set to false when evaluating or rendering
+        if self.config.stage == "bg":
+            # Background-only stage: standard NeRF without refraction/reflection
+            renderings, ray_history, rfls, ray_results, ray_samples = self.r3f(
+                rand=self.config.rand if self.training else False,
                 batch=batch,
                 train_frac=anneal_frac,
                 compute_extras=self.config.compute_extras,
-                zero_glo=self.config.zero_glo if self.training else True, # set to True when evaluating or rendering
+                zero_glo=self.config.zero_glo if self.training else True,
                 reflection=None,
-                scene=self.scene,)
+                scene=None,
+                straight=True,
+            )
+            renderings[-1]['rgb'] = torch.clip(image.linear_to_srgb(renderings[-1]['rgb']), 0.0, 1.0)
+        else:
+            renderings, ray_history, rfls, ray_results, ray_samples = self.r3f(
+                    rand=self.config.rand if self.training else False,
+                    batch=batch,
+                    train_frac=anneal_frac,
+                    compute_extras=self.config.compute_extras,
+                    zero_glo=self.config.zero_glo if self.training else True,
+                    reflection=None,
+                    scene=self.scene,)
 
-        renderings_rfl, _, _, _, _ = self.r3f(
-            rand=self.config.rand if self.training else False,  # set to false when evaluating or rendering
-            batch=batch,
-            train_frac=anneal_frac,
-            compute_extras=self.config.compute_extras,
-            zero_glo=self.config.zero_glo if self.training else True,  # set to True when evaluating or rendering
-            reflection=rfls,)  # set to True when rendering reflection, False when rendering refraction
+            renderings_rfl, _, _, _, _ = self.r3f(
+                rand=self.config.rand if self.training else False,
+                batch=batch,
+                train_frac=anneal_frac,
+                compute_extras=self.config.compute_extras,
+                zero_glo=self.config.zero_glo if self.training else True,
+                reflection=rfls,)
 
-        # Fresnel equation
-        ray_samples_rfl = rfls[-1]
-        normals = ray_samples_rfl.normals
-        ray_reflection = RayReflection(ray_samples_rfl.origins, ray_samples_rfl.directions, ray_samples_rfl.get_positions(), 1/self.scene['iors'][0])
-        R = ray_reflection.fresnel_fn(normals)  # [8192, 1]
-        rgb_rfl, rgb_rfr = renderings_rfl[2]['rgb'], renderings[2]['rgb']
-        comp_rgb = R * rgb_rfl + (1 - R) * rgb_rfr
-        comp_srgb = torch.clip(image.linear_to_srgb(comp_rgb), 0.0, 1.0)  # convert to sRGB and clip to [0, 1]
-        renderings[2]['rgb'] = comp_srgb
+            # Fresnel equation
+            ray_samples_rfl = rfls[-1]
+            normals = ray_samples_rfl.normals
+            ray_reflection = RayReflection(ray_samples_rfl.origins, ray_samples_rfl.directions, ray_samples_rfl.get_positions(), 1/self.scene['iors'][0])
+            R = ray_reflection.fresnel_fn(normals)  # [8192, 1]
+            rgb_rfl, rgb_rfr = renderings_rfl[2]['rgb'], renderings[2]['rgb']
+            comp_rgb = R * rgb_rfl + (1 - R) * rgb_rfr
+            comp_srgb = torch.clip(image.linear_to_srgb(comp_rgb), 0.0, 1.0)
+            renderings[2]['rgb'] = comp_srgb
 
         outputs={}
 
         # showed by viewer
-        outputs['rgb']=renderings[2]['rgb']
-        outputs['depth']=renderings[2]['depth'].unsqueeze(-1)
-        outputs['accumulation']=renderings[2]['acc']
+        outputs['rgb']=renderings[-1]['rgb']
+        outputs['depth']=renderings[-1]['depth'].unsqueeze(-1)
+        outputs['accumulation']=renderings[-1]['acc']
         if self.config.compute_extras:
-            outputs['distance_mean']=renderings[2]['distance_mean']
-            outputs['distance_median']=renderings[2]['distance_median']
+            outputs['distance_mean']=renderings[-1]['distance_mean']
+            outputs['distance_median']=renderings[-1]['distance_median']
 
         # for loss calculation
         outputs['renderings']=renderings
@@ -226,42 +242,34 @@ class R3FModel(Model):
     def get_loss_dict(self, outputs, batch, metrics_dict=None):
         """Returns a dictionary of losses to be summed which will be your loss."""
         loss_dict={}
-        batch['lossmult'] = torch.Tensor([1.]).to(self.device)
+
+        if self.config.stage == "bg" and "fg_mask" in batch:
+            # fg_mask: True/1 = foreground object pixels, False/0 = background pixels
+            # Zero out loss contribution for foreground rays
+            fg_mask = batch["fg_mask"].to(self.device).float()
+            batch['lossmult'] = (1.0 - fg_mask)[..., 0:1]  # 1 for background, 0 for foreground
+        else:
+            batch['lossmult'] = torch.Tensor([1.]).to(self.device)
 
         data_loss, stats = train_utils.compute_data_loss(batch, outputs['renderings'], self.r3f.config)
         loss_dict['data'] = data_loss
 
         if self.training:
-            # interlevel loss in MipNeRF360
-            # if self.config.interlevel_loss_mult > 0 and not self.config.single_mlp:
-            #     loss_dict['interlevel'] = train_utils.interlevel_loss(outputs['ray_history'], self.config)
-
             # interlevel loss in ZipNeRF360
             if self.r3f.config.anti_interlevel_loss_mult > 0 and not self.r3f.single_mlp:
                 loss_dict['anti_interlevel'] = train_utils.anti_interlevel_loss(outputs['ray_history'], self.r3f.config)
 
             # distortion loss
             if self.r3f.config.distortion_loss_mult > 0:
-                loss_dict['distortion'] = train_utils.distortion_loss(outputs['ray_history'], self.r3f.config, outputs['ray_samples'])
+                if self.config.stage == "bg":
+                    loss_dict['distortion'] = train_utils.distortion_loss_bg(outputs['ray_history'], self.r3f.config)
+                else:
+                    loss_dict['distortion'] = train_utils.distortion_loss(outputs['ray_history'], self.r3f.config, outputs['ray_samples'])
 
-            # opacity loss
-            # if self.config.opacity_loss_mult > 0:
-            #     loss_dict['opacity'] = train_utils.opacity_loss(outputs['rgb'], self.config)
-
-            # # orientation loss in RefNeRF
-            # if (self.config.orientation_coarse_loss_mult > 0 or
-            #         self.config.orientation_loss_mult > 0):
-            #     loss_dict['orientation'] = train_utils.orientation_loss(batch, self.config, outputs['ray_history'],
-            #                                                             self.config)
             # hash grid l2 weight decay
             if self.r3f.config.hash_decay_mults > 0:
                 loss_dict['hash_decay'] = train_utils.hash_decay_loss(outputs['ray_history'], self.r3f.config)
 
-            # # normal supervision loss in RefNeRF
-            # if (self.config.predicted_normal_coarse_loss_mult > 0 or
-            #         self.config.predicted_normal_loss_mult > 0):
-            #     loss_dict['predicted_normals'] = train_utils.predicted_normal_loss(
-            #         self.config, outputs['ray_history'], self.config)
         return loss_dict
 
 

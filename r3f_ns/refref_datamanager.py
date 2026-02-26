@@ -50,6 +50,8 @@ class RefRefDataManagerConfig(VanillaDataManagerConfig):
     """
 
     _target: Type = field(default_factory=lambda: RefRefDataManager)
+    stage: Literal["bg", "fg", "none"] = "none"
+    """Training stage: 'bg' trains background only, 'fg' reserved for future use."""
 
 
 class RefRefDataManager(VanillaDataManager[RefRefDataset]):
@@ -122,6 +124,7 @@ class RefRefDataManager(VanillaDataManager[RefRefDataset]):
             dataparser_outputs=self.dataparser.get_dataparser_outputs(split="train"),
             scale_factor=self.config.camera_res_scale_factor,
             mode="train",
+            stage=self.config.stage,
         )
 
     def create_eval_dataset(self) -> RefRefDataset:
@@ -130,6 +133,7 @@ class RefRefDataManager(VanillaDataManager[RefRefDataset]):
             dataparser_outputs=self.dataparser.get_dataparser_outputs(split=self.test_split),
             scale_factor=self.config.camera_res_scale_factor,
             mode="eval",
+            stage=self.config.stage,
         )
 
     def setup_train(self):

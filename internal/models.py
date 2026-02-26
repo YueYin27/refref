@@ -234,7 +234,15 @@ class Model(nn.Module):
             origins = batch['origins'].unsqueeze(1).expand(-1, tdist.shape[1]-1, -1)  # [8192, 64, 3]
             directions = batch['directions'].unsqueeze(1).expand(-1, tdist.shape[1]-1, -1)  # [8192, 64, 3]
 
-            if reflection is None:  # refraction pass
+            if straight or scene is None:
+                # Standard NeRF pass: no refraction or reflection
+                ray_samples = ray_samplers.RaySamples(
+                    origins=origins,
+                    directions=directions,
+                    starts=tdist[..., :-1, None],
+                    ends=tdist[..., 1:, None],
+                )
+            elif reflection is None:  # refraction pass
                 # Get refracted origins and directions, reflect origins and directions
                 ray_samples = ray_samplers.RaySamples(
                     origins=origins,
@@ -271,7 +279,12 @@ class Model(nn.Module):
             mlp = (self.get_submodule(
                 f'prop_mlp_{i_level}') if self.distinct_prop else self.prop_mlp) if is_prop else self.nerf_mlp
 
-            refdirs = reflection[i_level].directions if reflection else ray_samples_rfl.directions
+            if straight or scene is None:
+                refdirs = ray_samples.directions
+            elif reflection:
+                refdirs = reflection[i_level].directions
+            else:
+                refdirs = ray_samples_rfl.directions
 
             ray_results = mlp(
                 rand,

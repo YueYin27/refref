@@ -47,12 +47,12 @@ class RefRefDataset(InputDataset):
         scale_factor: The scaling factor for the dataparser outputs
     """
 
-    exclude_batch_keys_from_device: List[str] = ["image", "mask"]
+    exclude_batch_keys_from_device: List[str] = ["image", "mask", "fg_mask"]
     cameras: Cameras
 
-    def __init__(self, dataparser_outputs: DataparserOutputs, scale_factor: float = 1.0, mode: Literal["train", "eval"] = "train"):
+    def __init__(self, dataparser_outputs: DataparserOutputs, scale_factor: float = 1.0, mode: Literal["train", "eval"] = "train", stage: Literal["bg", "fg", "none"] = "none"):
         super().__init__(dataparser_outputs=dataparser_outputs)
-        print("✅ RefRefDataset: Initialised with", len(dataparser_outputs.image_filenames), "images in", mode, "mode")
+        print("✅ RefRefDataset: Initialised with", len(dataparser_outputs.image_filenames), "images in", mode, "mode, stage:", stage)
         self._dataparser_outputs = dataparser_outputs
         self.scale_factor = scale_factor
         self.scene_box = deepcopy(dataparser_outputs.scene_box)
@@ -61,6 +61,7 @@ class RefRefDataset(InputDataset):
         self.cameras.rescale_output_resolution(scaling_factor=scale_factor)
         self.mask_color = dataparser_outputs.metadata.get("mask_color", None)
         self.mode = mode
+        self.stage = stage
 
     def __len__(self):
         return len(self._dataparser_outputs.image_filenames)
@@ -137,6 +138,17 @@ class RefRefDataset(InputDataset):
             raise NotImplementedError(f"image_type (={image_type}) getter was not implemented, use uint8 or float32")
 
         data = {"image_idx": image_idx, "image": image}
+
+        # In bg stage, load foreground mask during training so we can exclude object rays from the loss
+        if self.stage == "bg" and self.mode == "train":
+            if self._dataparser_outputs.mask_filenames is not None:
+                mask_filepath = self._dataparser_outputs.mask_filenames[image_idx]
+                fg_mask = get_image_mask_tensor_from_path(filepath=mask_filepath, scale_factor=self.scale_factor)
+                assert (
+                    fg_mask.shape[:2] == data["image"].shape[:2]
+                ), f"Mask and image have different shapes. Got {fg_mask.shape[:2]} and {data['image'].shape[:2]}"
+                data["fg_mask"] = fg_mask.float()
+
         if self.mode == "eval":
             if self._dataparser_outputs.mask_filenames is not None:
                 mask_filepath = self._dataparser_outputs.mask_filenames[image_idx]

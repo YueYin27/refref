@@ -188,6 +188,16 @@ def distortion_loss(ray_history, config, ray_samples=None):
     return config.distortion_loss_mult * loss
 
 
+def distortion_loss_bg(ray_history, config):
+    """Computes the distortion loss regularizer defined in mip-NeRF 360."""
+    last_ray_results = ray_history[-1]
+    c = last_ray_results['sdist']
+    w = last_ray_results['weights']
+    # loss = stepfun.lossfun_distortion(c, w).mean()
+    loss = stepfun.lossfun_distortion(c, w).mean()  # corrected distortion loss
+    return config.distortion_loss_mult * loss
+
+
 def orientation_loss(batch, model, ray_history, config):
     """Computes the orientation loss regularizer defined in ref-NeRF."""
     total_loss = 0.

@@ -61,6 +61,8 @@ class R3FPipelineConfig(VanillaPipelineConfig):
     """specifies the datamanager config"""
     model: ModelConfig = R3FModelConfig()
     """specifies the model config"""
+    stage: Literal["bg", "fg", "none"] = "none"
+    """Training stage: 'bg' trains background only (masking out foreground object), 'fg' is reserved for future use."""
 
 
 class R3FPipeline(VanillaPipeline):
@@ -82,6 +84,11 @@ class R3FPipeline(VanillaPipeline):
         super(VanillaPipeline, self).__init__()
         self.config = config
         self.test_mode = test_mode
+
+        # Propagate stage to datamanager and model configs
+        config.datamanager.stage = config.stage
+        config.model.stage = config.stage
+
         self.datamanager: DataManager = config.datamanager.setup(
             device=device, test_mode=test_mode, world_size=world_size, local_rank=local_rank
         )

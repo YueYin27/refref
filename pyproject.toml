@@ -51,3 +51,4 @@ r3f_ns = 'r3f_ns.r3f_config:r3f_method'
 # register the entry point of your new dataparser here:
 [project.entry-points.'nerfstudio.dataparser_configs']
 refref-data = 'r3f_ns.refref_dataparser_config:refref_dataparser'
+blender-refref-data = 'r3f_ns.blender_refref_dataparser_config:blender_refref_dataparser'

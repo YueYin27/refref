@@ -22,20 +22,56 @@ export HF_CACHE_DIR="/home/projects/u7535192/.cache/huggingface"
 
 cd ..
 ns-train r3f refref-data --help
-dataset_name="cube"
-ply_files="/home/projects/RefRef/mesh_files/single-convex/cube_glass.ply"
-ns-train r3f --machine.device-type cuda \
-             --machine.num-devices 1 \
-             --project-name r3f \
-             --experiment-name "r3f_oracle_${dataset_name}" \
-             --pipeline.model.gin-file "configs/refref.gin" \
-             --pipeline.model.background-color random \
-             --max-num-iterations 25000 \
-             --steps_per_eval_image 1000 \
-             --vis wandb \
-             --output-dir "outputs" \
-         refref-data \
-             --scene-name "cube_smcvx_cube" \
-             --scale-factor 0.1 \
-             --ply-path "${ply_files}"
+dataset_name="ball"
+ply_files="/home/projects/u7535192/projects/refref/data/real-data/glass_glass.ply"
+
+WANDB_TMPDIR=$(mktemp -d)
+export WANDB_DIR="$WANDB_TMPDIR"
+
+ns-train r3f --pipeline.stage bg \
+            --machine.device-type cuda \
+            --machine.num-devices 1 \
+            --project-name r3f \
+            --experiment-name "r3f_${dataset_name}" \
+            --pipeline.model.gin-file "configs/refref.gin" \
+            --pipeline.model.background-color random \
+            --max-num-iterations 25000 \
+            --steps_per_eval_image 500 \
+            --vis wandb \
+            --data "/workspace/image_data/textured_cube_scene/single-convex/ball" \
+            --output-dir "outputs" \
+        blender-refref-data \
+            --scale-factor 0.1
+
+rm -rf "$WANDB_TMPDIR"
+rm -rf outputs/r3f_*/r3f/*/wandb
+
+python extract_mesh_stage1.py --cfg data/model/ball_coloured/ball_coloured.yaml
+
+# ── Stage 2: FG (foreground in-object field) ──
+# Set bg_ckpt to the checkpoint from the bg stage above
+bg_ckpt="outputs/r3f_ball/r3f/2026-02-26_121600/nerfstudio_models/step-000010000.ckpt"
+ply_files="outputs/r3f_ball/r3f/2026-02-26_121600/ball_glass.ply"
+WANDB_TMPDIR=$(mktemp -d)
+export WANDB_DIR="$WANDB_TMPDIR"
+
+ns-train r3f --pipeline.stage fg \
+            --pipeline.bg-checkpoint-path "$bg_ckpt" \
+            --machine.device-type cuda \
+            --machine.num-devices 1 \
+            --project-name r3f \
+            --experiment-name "r3f_${dataset_name}_fg" \
+            --pipeline.model.gin-file "configs/refref.gin" \
+            --pipeline.model.background-color random \
+            --max-num-iterations 25000 \
+            --steps_per_eval_image 100 \
+            --vis wandb \
+            --data "/workspace/image_data/textured_cube_scene/single-convex/ball" \
+            --output-dir "outputs" \
+        blender-refref-data \
+            --scale-factor 0.1 \
+            --ply-path "${ply_files}"
+
+rm -rf "$WANDB_TMPDIR"
+rm -rf outputs/r3f_*/r3f/*/wandb
 

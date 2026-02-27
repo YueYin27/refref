@@ -116,6 +116,8 @@ class Model(nn.Module):
             reflection=None,
             scene=None,
             straight=False,
+            custom_bg_rgbs=None,
+            t_max=None,
     ):
         """The mip-NeRF Model.
 
@@ -299,6 +301,11 @@ class Model(nn.Module):
                 ray_results['rgb'], ray_results['density'] = train_utils.GradientScaler.apply(
                     ray_results['rgb'], ray_results['density'], ts.mean(dim=-1))
 
+            if t_max is not None:
+                tdist_mid = (tdist[..., :-1] + tdist[..., 1:]) / 2
+                post_exit = tdist_mid > t_max.unsqueeze(-1)
+                ray_results['density'] = ray_results['density'] * (~post_exit).float()
+
             # Get the weights used by volumetric rendering (and our other losses).
             weights = render.compute_alpha_weights_ref(
                 ray_results['density'],
@@ -308,14 +315,13 @@ class Model(nn.Module):
             )[0]
 
             # Define or sample the background color for each ray.
-            if self.bg_intensity_range[0] == self.bg_intensity_range[1]:
-                # If the min and max of the range are equal, just take it.
+            if custom_bg_rgbs is not None:
+                bg_rgbs = custom_bg_rgbs
+            elif self.bg_intensity_range[0] == self.bg_intensity_range[1]:
                 bg_rgbs = self.bg_intensity_range[0]
             elif rand is None:
-                # If rendering is deterministic, use the midpoint of the range.
                 bg_rgbs = (self.bg_intensity_range[0] + self.bg_intensity_range[1]) / 2
             else:
-                # Sample RGB values from the range for each ray.
                 minval = self.bg_intensity_range[0]
                 maxval = self.bg_intensity_range[1]
                 bg_rgbs = torch.rand(weights.shape[:-1] + (3,), device=device) * (maxval - minval) + minval

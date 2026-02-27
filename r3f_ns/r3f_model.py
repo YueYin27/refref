@@ -27,6 +27,7 @@ import gin
 import numpy as np
 import open3d as o3d
 import torch
+import torch.nn.functional as F
 import trimesh
 from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.engine.callbacks import (
@@ -64,7 +65,9 @@ class R3FModelConfig(ModelConfig):
     background_color: Literal["random", "black", "white"] = "white"
     """Whether to randomize the background color."""
     stage: Literal["bg", "fg", "none"] = "none"
-    """Training stage: 'bg' trains background only (masking out foreground), 'fg' reserved for future use."""
+    """Training stage: 'bg' trains background only, 'fg' trains foreground in-object field."""
+    bg_checkpoint_path: str = None
+    """Path to background field checkpoint for fg stage."""
     _target: Type = field(default_factory=lambda: R3FModel)
 
 class R3FModel(Model):
@@ -114,6 +117,22 @@ class R3FModel(Model):
 
         self.r3f = r3f(config=config)
 
+        if self.config.stage == "fg":
+            assert self.config.bg_checkpoint_path is not None, "bg_checkpoint_path required for fg stage"
+            assert self.scene is not None, "Mesh (ply) file required for fg stage"
+            self.r3f_bg = r3f(config=config)
+            ckpt = torch.load(self.config.bg_checkpoint_path, map_location="cpu")
+            bg_state = {
+                k.replace('_model.r3f.', ''): v
+                for k, v in ckpt['pipeline'].items()
+                if k.startswith('_model.r3f.')
+            }
+            self.r3f_bg.load_state_dict(bg_state)
+            self.r3f_bg.eval()
+            for p in self.r3f_bg.parameters():
+                p.requires_grad_(False)
+            print(f"Loaded frozen BG field from {self.config.bg_checkpoint_path}")
+
         self.collider = NearFarCollider(near_plane=self.r3f.config.near, far_plane=self.r3f.config.far)
         self.step = 0
 
@@ -139,6 +158,221 @@ class R3FModel(Model):
         # batch['exposure_values'] = None
         return batch
 
+    def _snell_refract(self, d, n, r):
+        """Snell's law refraction for per-ray tensors.
+        Args:
+            d: incident direction [N, 3] (unit)
+            n: surface normal [N, 3] (unit, pointing towards incident side)
+            r: ratio n1/n2 (scalar)
+        Returns:
+            refracted direction [N, 3] (unit), tir_mask [N] (True where total internal reflection)
+        """
+        cos_i = -(d * n).sum(-1, keepdim=True)  # [N, 1]
+        sin2_t = r**2 * (1 - cos_i**2)
+        tir_mask = (sin2_t.squeeze(-1) > 1.0)
+        cos_t = torch.sqrt((1 - sin2_t).clamp(min=0))
+        refracted = r * d + (r * cos_i - cos_t) * n
+        refracted = F.normalize(refracted, dim=-1)
+        reflected = d + 2 * cos_i * n
+        reflected = F.normalize(reflected, dim=-1)
+        result = torch.where(tir_mask.unsqueeze(-1), reflected, refracted)
+        return result, tir_mask
+
+    def _fresnel_R(self, cos_i, r):
+        """Compute Fresnel reflectance (unpolarized average).
+        Args:
+            cos_i: cosine of incidence angle [N] (positive)
+            r: ratio n1/n2 (scalar)
+        Returns:
+            R [N, 1]
+        """
+        sin2_t = r**2 * (1 - cos_i**2)
+        sin2_t = sin2_t.clamp(0, 1)
+        cos_t = torch.sqrt(1 - sin2_t)
+        eps = 1e-6
+        Rs = ((r * cos_i - cos_t) / (r * cos_i + cos_t + eps))**2
+        Rp = ((r * cos_t - cos_i) / (cos_i + r * cos_t + eps))**2
+        R = ((Rs + Rp) / 2).unsqueeze(-1)
+        return torch.nan_to_num(R, nan=0.0)
+
+    def _query_bg_field(self, origins, directions, radii, cam_idx, near, far):
+        """Query the frozen background field for a set of rays.
+        Always uses train_frac=1.0 since the bg field is fully trained."""
+        bg_batch = {
+            'origins': origins,
+            'directions': directions,
+            'viewdirs': directions,
+            'radii': radii,
+            'cam_idx': cam_idx,
+            'near': near,
+            'far': far,
+            'cam_dirs': None,
+        }
+        renderings_bg, _, _, _, _ = self.r3f_bg(
+            rand=False,
+            batch=bg_batch,
+            train_frac=1.0,
+            compute_extras=False,
+            zero_glo=True,
+            straight=True,
+            scene=None,
+        )
+        return renderings_bg[-1]['rgb']
+
+    def _render_fg_stage(self, batch, anneal_frac):
+        """Full rendering pipeline for fg stage: fg field (interior) + frozen bg field (exit/reflected).
+        Only runs fg field on rays that hit the object; non-hitting rays use the frozen bg field directly."""
+        device = batch['origins'].device
+        scene_o3d = self.scene['scene']
+        ior = self.scene['iors'][0].item()
+        N = batch['origins'].shape[0]
+
+        cam_origins = batch['origins']          # [N, 3]
+        cam_dirs = batch['directions']          # [N, 3] (scaled by directions_norm)
+        cam_dirs_hat = F.normalize(cam_dirs, dim=-1)
+
+        # ── Step 1: Pre-compute entry/exit geometry via Open3D ──
+        with torch.no_grad():
+            rays_np = torch.cat([cam_origins, cam_dirs_hat], dim=-1).detach().cpu().numpy()
+            rays_o3d = o3d.core.Tensor(rays_np, dtype=o3d.core.Dtype.Float32)
+            result_entry = scene_o3d.cast_rays(rays_o3d)
+
+            t_entry = torch.from_numpy(result_entry['t_hit'].numpy()).to(device)
+            entry_normals = torch.from_numpy(result_entry['primitive_normals'].numpy()).to(device)
+            hit_mask = t_entry < 1e9
+            n_hit = hit_mask.sum().item()
+
+            entry_points = cam_origins + t_entry.unsqueeze(-1) * cam_dirs_hat
+
+            # Orient normals towards camera
+            cos_i_raw = -(cam_dirs_hat * entry_normals).sum(-1, keepdim=True)
+            entry_normals = torch.where(cos_i_raw < 0, -entry_normals, entry_normals)
+            cos_i = cos_i_raw.abs()   # [N, 1]
+
+            # Reflected direction at entry
+            reflected_dirs = cam_dirs_hat + 2 * cos_i * entry_normals
+            reflected_dirs = F.normalize(reflected_dirs, dim=-1)
+
+            # Refracted direction at entry (air -> object)
+            refracted_dirs, _ = self._snell_refract(cam_dirs_hat, entry_normals, 1.0 / ior)
+
+        # ── Step 2: Query frozen BG field for non-hitting camera rays ──
+        # Use the original scaled directions (not normalized) to match bg field training
+        final_rgb = torch.zeros(N, 3, device=device)
+        with torch.no_grad():
+            if n_hit < N:
+                nonhit_rgb = self._query_bg_field(
+                    cam_origins[~hit_mask], cam_dirs[~hit_mask],
+                    batch['radii'][~hit_mask], batch['cam_idx'][~hit_mask],
+                    batch['near'][~hit_mask], batch['far'][~hit_mask])
+                final_rgb[~hit_mask] = torch.clip(image.linear_to_srgb(nonhit_rgb), 0.0, 1.0)
+
+        # ── Step 3: For hitting rays, trace exit geometry and query bg field ──
+        ray_history = []
+        rfls = []
+        ray_results = {}
+        ray_samples = None
+        renderings_hit = None
+
+        if n_hit > 0:
+            with torch.no_grad():
+                # Safe tensors (only hitting rays from here)
+                entry_pts_h = entry_points[hit_mask]
+                refr_dirs_h = refracted_dirs[hit_mask]
+
+                # Cast refracted ray to find exit point
+                eps_geom = 1e-4
+                rays_inner = torch.cat([entry_pts_h + eps_geom * refr_dirs_h, refr_dirs_h], dim=-1)
+                result_exit = scene_o3d.cast_rays(
+                    o3d.core.Tensor(rays_inner.detach().cpu().numpy(), dtype=o3d.core.Dtype.Float32))
+
+                t_inner = torch.from_numpy(result_exit['t_hit'].numpy()).to(device)
+                exit_normals_raw = torch.from_numpy(result_exit['primitive_normals'].numpy()).to(device)
+                exit_pts_h = entry_pts_h + (eps_geom + t_inner.unsqueeze(-1)) * refr_dirs_h
+
+                # Orient exit normals towards interior
+                cos_exit_raw = -(refr_dirs_h * exit_normals_raw).sum(-1, keepdim=True)
+                exit_normals = torch.where(cos_exit_raw < 0, -exit_normals_raw, exit_normals_raw)
+
+                # Exit direction (object -> air)
+                exit_dirs_h, _ = self._snell_refract(refr_dirs_h, exit_normals, ior / 1.0)
+
+                # Project exit point onto camera ray to get t_back
+                t_back_h = ((exit_pts_h - cam_origins[hit_mask]) * cam_dirs_hat[hit_mask]).sum(-1)
+
+                # Query bg field for exit-ray colors
+                ray_eps = 1e-3
+                exit_rgb_h = self._query_bg_field(
+                    exit_pts_h + ray_eps * exit_dirs_h, exit_dirs_h,
+                    batch['radii'][hit_mask], batch['cam_idx'][hit_mask],
+                    torch.full((n_hit, 1), 0.01, device=device),
+                    batch['far'][hit_mask])
+
+                # Query bg field for reflected-ray colors
+                reflected_rgb_h = self._query_bg_field(
+                    entry_pts_h + 1e-3 * reflected_dirs[hit_mask], reflected_dirs[hit_mask],
+                    batch['radii'][hit_mask], batch['cam_idx'][hit_mask],
+                    torch.full((n_hit, 1), 0.01, device=device),
+                    batch['far'][hit_mask])
+
+            # ── Step 4: Constrain near/far and build hitting-only batch ──
+            near_offset = 0.05
+            far_offset = 0.05
+            hit_near = (t_entry[hit_mask] - near_offset).clamp(min=1e-3).unsqueeze(-1)
+            hit_far = (t_back_h + far_offset).clamp(max=batch['far'].max().item()).unsqueeze(-1)
+            hit_far = torch.max(hit_far, hit_near + 0.02)
+
+            batch_hit = {
+                'origins': batch['origins'][hit_mask],
+                'directions': batch['directions'][hit_mask],
+                'viewdirs': batch['viewdirs'][hit_mask],
+                'radii': batch['radii'][hit_mask],
+                'cam_idx': batch['cam_idx'][hit_mask],
+                'near': hit_near,
+                'far': hit_far,
+                'cam_dirs': None,
+            }
+
+            # ── Step 5: Run FG field on hitting rays only ──
+            renderings_hit, ray_history, rfls, ray_results, ray_samples = self.r3f(
+                rand=self.config.rand if self.training else False,
+                batch=batch_hit,
+                train_frac=anneal_frac,
+                compute_extras=self.config.compute_extras,
+                zero_glo=self.config.zero_glo if self.training else True,
+                reflection=None,
+                scene=self.scene,
+                custom_bg_rgbs=exit_rgb_h,
+                t_max=t_back_h + far_offset,
+            )
+
+            # ── Step 6: Fresnel combine (linear space, hitting rays only) ──
+            # interior_rgb_h = exit_rgb_h  # DEBUG: bypass fg field, use bg exit color directly (density=0 equivalent)
+            interior_rgb_h = renderings_hit[-1]['rgb']
+            R_h = self._fresnel_R(cos_i[hit_mask].squeeze(-1), 1.0 / ior)
+            comp_h = R_h * reflected_rgb_h + (1 - R_h) * interior_rgb_h
+            final_rgb[hit_mask] = torch.clip(image.linear_to_srgb(comp_h), 0.0, 1.0)
+
+        # ── Step 7: Assemble full-size renderings for loss computation ──
+        renderings = []
+        if renderings_hit is not None:
+            for rend_h in renderings_hit:
+                full_rend = {}
+                for k, v in rend_h.items():
+                    if isinstance(v, torch.Tensor) and v.ndim > 0 and v.shape[0] == n_hit:
+                        full_v = torch.zeros(N, *v.shape[1:], device=device, dtype=v.dtype)
+                        full_v[hit_mask] = v
+                        full_rend[k] = full_v
+                    else:
+                        full_rend[k] = v
+                renderings.append(full_rend)
+            renderings[-1]['rgb'] = final_rgb
+        else:
+            renderings = [{'rgb': final_rgb, 'depth': torch.zeros(N, device=device),
+                           'acc': torch.zeros(N, device=device)}]
+
+        return renderings, ray_history, rfls, ray_results, ray_samples, hit_mask
+
     def get_outputs(self, ray_bundle: RayBundle):
         ray_bundle.metadata["viewdirs"] = ray_bundle.directions
         ray_bundle.metadata["radii"] = torch.sqrt(ray_bundle.pixel_area)* 2 / torch.sqrt(torch.full_like(ray_bundle.pixel_area,12.))
@@ -163,6 +397,11 @@ class R3FModel(Model):
                 straight=True,
             )
             renderings[-1]['rgb'] = torch.clip(image.linear_to_srgb(renderings[-1]['rgb']), 0.0, 1.0)
+
+        elif self.config.stage == "fg":
+            renderings, ray_history, rfls, ray_results, ray_samples, hit_mask = \
+                self._render_fg_stage(batch, anneal_frac)
+
         else:
             renderings, ray_history, rfls, ray_results, ray_samples = self.r3f(
                     rand=self.config.rand if self.training else False,
@@ -195,16 +434,19 @@ class R3FModel(Model):
 
         # showed by viewer
         outputs['rgb']=renderings[-1]['rgb']
-        outputs['depth']=renderings[-1]['depth'].unsqueeze(-1)
+        depth = renderings[-1]['depth']
+        outputs['depth']=depth.unsqueeze(-1) if depth.ndim == 1 else depth
         outputs['accumulation']=renderings[-1]['acc']
         if self.config.compute_extras:
-            outputs['distance_mean']=renderings[-1]['distance_mean']
-            outputs['distance_median']=renderings[-1]['distance_median']
+            outputs['distance_mean']=renderings[-1].get('distance_mean', depth)
+            outputs['distance_median']=renderings[-1].get('distance_median', depth)
 
         # for loss calculation
         outputs['renderings']=renderings
         outputs['ray_history'] = ray_history
         outputs['ray_samples'] = ray_samples
+        if self.config.stage == "fg":
+            outputs['hit_mask'] = hit_mask
         return outputs
 
     def get_training_callbacks(
@@ -227,7 +469,7 @@ class R3FModel(Model):
     def get_param_groups(self) -> Dict[str, List[Parameter]]:
             """Returns the parameter groups needed to optimizer your model components."""
             param_groups = {}
-            param_groups["model"] = list(self.parameters())
+            param_groups["model"] = [p for p in self.parameters() if p.requires_grad]
             return param_groups
 
 
@@ -244,10 +486,11 @@ class R3FModel(Model):
         loss_dict={}
 
         if self.config.stage == "bg" and "fg_mask" in batch:
-            # fg_mask: True/1 = foreground object pixels, False/0 = background pixels
-            # Zero out loss contribution for foreground rays
             fg_mask = batch["fg_mask"].to(self.device).float()
-            batch['lossmult'] = (1.0 - fg_mask)[..., 0:1]  # 1 for background, 0 for foreground
+            batch['lossmult'] = (1.0 - fg_mask)[..., 0:1]
+        elif self.config.stage == "fg" and "hit_mask" in outputs:
+            hit_mask = outputs["hit_mask"].to(self.device).float()
+            batch['lossmult'] = hit_mask.unsqueeze(-1)
         else:
             batch['lossmult'] = torch.Tensor([1.]).to(self.device)
 
@@ -269,6 +512,13 @@ class R3FModel(Model):
             # hash grid l2 weight decay
             if self.r3f.config.hash_decay_mults > 0:
                 loss_dict['hash_decay'] = train_utils.hash_decay_loss(outputs['ray_history'], self.r3f.config)
+
+            # # L1 sparsity on fg field opacity to encourage transparency
+            # if self.config.stage == "fg" and "hit_mask" in outputs:
+            #     acc = outputs['renderings'][-1]['acc']
+            #     hit_mask_bool = outputs['hit_mask'].bool()
+            #     if hit_mask_bool.any():
+            #         loss_dict['fg_sparsity'] = 0.5 * acc[hit_mask_bool].mean()
 
         return loss_dict
 

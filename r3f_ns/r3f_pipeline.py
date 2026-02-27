@@ -62,7 +62,9 @@ class R3FPipelineConfig(VanillaPipelineConfig):
     model: ModelConfig = R3FModelConfig()
     """specifies the model config"""
     stage: Literal["bg", "fg", "none"] = "none"
-    """Training stage: 'bg' trains background only (masking out foreground object), 'fg' is reserved for future use."""
+    """Training stage: 'bg' trains background only (masking out foreground object), 'fg' trains foreground in-object field."""
+    bg_checkpoint_path: Optional[str] = None
+    """Path to background field checkpoint for fg stage (e.g., .../step-000010000.ckpt)."""
 
 
 class R3FPipeline(VanillaPipeline):
@@ -85,9 +87,11 @@ class R3FPipeline(VanillaPipeline):
         self.config = config
         self.test_mode = test_mode
 
-        # Propagate stage to datamanager and model configs
+        # Propagate stage and bg checkpoint to datamanager and model configs
         config.datamanager.stage = config.stage
         config.model.stage = config.stage
+        if config.bg_checkpoint_path is not None:
+            config.model.bg_checkpoint_path = config.bg_checkpoint_path
 
         self.datamanager: DataManager = config.datamanager.setup(
             device=device, test_mode=test_mode, world_size=world_size, local_rank=local_rank

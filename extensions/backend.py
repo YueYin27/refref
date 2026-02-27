@@ -152,6 +152,8 @@ class Backend:
     def set_backend(cls, backend_name):
         with cls.single_lock:
             if cls.backend is not None:
+                if cls.name == backend_name:
+                    return
                 raise Exception('Backend cannot be set repeatedly')
 
             if backend_name not in cls.backend_name2class.keys():

@@ -67,6 +67,8 @@ class R3FModelConfig(ModelConfig):
     """Training stage: 'bg' trains background only, 'fg' trains foreground in-object field."""
     bg_checkpoint_path: str = None
     """Path to background field checkpoint for fg stage."""
+    max_refracted_bounces: int = 12
+    """Max refracted bounces (entry + TIR) in ray tracing; one TIR counts as one bounce (default 12)."""
     _target: Type = field(default_factory=lambda: R3FModel)
 
 class R3FModel(Model):
@@ -87,6 +89,7 @@ class R3FModel(Model):
                 gin_files.append(package_path+'/'+g)
         gin.parse_config_files_and_bindings(gin_files, None)
         config = Config()
+        config.max_refracted_bounces = self.config.max_refracted_bounces
 
         # load mesh files and build GPU BVH ray tracer
         ior_map = {"glass": 1.5, "water": 1.333, "diamond": 2.418, "air": 1.0, "alcohol": 1.36, "plastic": 1.45, "perfume": 1.46}
@@ -288,7 +291,7 @@ class R3FModel(Model):
                 remaining_tir = tir_at_exit.clone()
                 current_pts = exit_pts_h.clone()
                 current_dirs = exit_dirs_h.clone()
-                for _bounce in range(12):
+                for _bounce in range(self.config.max_refracted_bounces - 1):  # entry = 1, TIR = rest
                     if not remaining_tir.any():
                         break
                     tir_idx = remaining_tir
@@ -521,23 +524,13 @@ class R3FModel(Model):
             if self.r3f.config.anti_interlevel_loss_mult > 0 and not self.r3f.single_mlp:
                 loss_dict['anti_interlevel'] = train_utils.anti_interlevel_loss(outputs['ray_history'], self.r3f.config)
 
-            # distortion loss
-            if self.r3f.config.distortion_loss_mult > 0:
-                if self.config.stage == "bg":
-                    loss_dict['distortion'] = train_utils.distortion_loss_bg(outputs['ray_history'], self.r3f.config)
-                else:
-                    loss_dict['distortion'] = train_utils.distortion_loss(outputs['ray_history'], self.r3f.config, outputs['ray_samples'])
+            # distortion loss (bg only; disabled for fg stage)
+            if self.r3f.config.distortion_loss_mult > 0 and self.config.stage == "bg":
+                loss_dict['distortion'] = train_utils.distortion_loss_bg(outputs['ray_history'], self.r3f.config)
 
             # hash grid l2 weight decay
             if self.r3f.config.hash_decay_mults > 0:
                 loss_dict['hash_decay'] = train_utils.hash_decay_loss(outputs['ray_history'], self.r3f.config)
-
-            # # L1 sparsity on fg field opacity to encourage transparency
-            # if self.config.stage == "fg" and "hit_mask" in outputs:
-            #     acc = outputs['renderings'][-1]['acc']
-            #     hit_mask_bool = outputs['hit_mask'].bool()
-            #     if hit_mask_bool.any():
-            #         loss_dict['fg_sparsity'] = 0.5 * acc[hit_mask_bool].mean()
 
         return loss_dict
 

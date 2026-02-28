@@ -93,6 +93,7 @@ class Config:
     adam_eps: float = 1e-15  # Adam's epsilon hyperparameter.
     grad_max_norm: float = 0.  # Gradient clipping magnitude, disabled if == 0.
     grad_max_val: float = 0.  # Gradient clipping value, disabled if == 0.
+    max_refracted_bounces: int = 12  # Max bounces (entry + TIR) in ray tracing; TIR counts as one bounce.
     distortion_loss_mult: float = 0.005  # Multiplier on the distortion loss.
     opacity_loss_mult: float = 0.  # Multiplier on the distortion loss.
 

@@ -252,7 +252,9 @@ class Model(nn.Module):
                     starts=tdist[..., :-1, None],
                     ends=tdist[..., 1:, None],
                 )
-                intersections_list, normals, mask_update = ray_samples.get_refracted_rays(scene)
+                intersections_list, normals, mask_update = ray_samples.get_refracted_rays(
+                    scene, max_bounces=self.config.max_refracted_bounces
+                )
 
                 ray_samples_rfl = ray_samplers.RaySamples(
                     origins=origins,

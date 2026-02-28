@@ -73,7 +73,7 @@ class RaySamples(TensorDataclass):
             pos = pos + self.offsets
         return pos
 
-    def get_refracted_rays(self, scene_dict: dict):
+    def get_refracted_rays(self, scene_dict: dict, max_bounces: int = 12):
         scene = scene_dict['scene']
         iors = scene_dict['iors'].to(self.origins.device)
 
@@ -173,8 +173,8 @@ class RaySamples(TensorDataclass):
             rows_with_non_nan = rows_with_non_nan.any(dim=1)
             num_non_nan_rows = rows_with_non_nan.sum().item()
 
-            # Break the loop if no more intersections are found
-            if num_non_nan_rows == 0 or i > 30:
+            # Break when no more hits or total bounces >= max (1 entry + i loop iters)
+            if num_non_nan_rows == 0 or i >= max_bounces - 1:
                 break
 
         origins_final = origins.clone()

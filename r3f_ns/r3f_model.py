@@ -288,7 +288,7 @@ class R3FModel(Model):
                 remaining_tir = tir_at_exit.clone()
                 current_pts = exit_pts_h.clone()
                 current_dirs = exit_dirs_h.clone()
-                for _bounce in range(10):
+                for _bounce in range(12):
                     if not remaining_tir.any():
                         break
                     tir_idx = remaining_tir

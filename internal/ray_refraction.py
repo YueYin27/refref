@@ -83,9 +83,6 @@ class MeshRefraction(RayRefraction):
         self.directions = directions / torch.norm(directions, p=2, dim=-1, keepdim=True)
         self.positions = positions
         self.r = r
-        # #region agent log
-        import json as _json_dbg5; _norms_l2 = torch.norm(directions, p=2, dim=-1); _norms_minf = torch.norm(directions, p=-1, dim=-1); _norms_after = torch.norm(self.directions, p=2, dim=-1); open('/workspace/.cursor/debug-a2f859.log','a').write(_json_dbg5.dumps({"sessionId":"a2f859","hypothesisId":"H4","location":"ray_refraction.py:MeshRefraction.__init__","message":"Direction norm check","data":{"input_l2_mean":float(_norms_l2.mean().item()),"input_minf_mean":float(_norms_minf.mean().item()),"after_l2_mean":float(_norms_after.mean().item()),"after_l2_min":float(_norms_after.min().item()),"after_l2_max":float(_norms_after.max().item())}})+'\n')
-        # #endregion
 
     def get_intersections_and_normals(self, scene, origins, directions, indices_prev):
         """
@@ -177,9 +174,6 @@ class MeshRefraction(RayRefraction):
         # Adjust r's shape for broadcasting (match original scalar Snell fn behavior)
         sqrt_term = 1 - (r[:, None] ** 2) * (1 - c ** 2)
         total_internal_reflection_mask = sqrt_term < 1e-6
-        # #region agent log
-        import json as _json_dbg6; open('/workspace/.cursor/debug-a2f859.log','a').write(_json_dbg6.dumps({"sessionId":"a2f859","hypothesisId":"H3+H4","location":"ray_refraction.py:MeshRefraction.snell_fn","message":"snell_fn sqrt_term and TIR","data":{"r_min":float(r.min().item()),"r_max":float(r.max().item()),"c_min":float(c.min().item()),"c_max":float(c.max().item()),"sqrt_min":float(sqrt_term.min().item()),"sqrt_max":float(sqrt_term.max().item()),"tir_count":int(total_internal_reflection_mask.sum().item()),"total_elements":int(total_internal_reflection_mask.numel())}})+'\n')
-        # #endregion
 
         # create a mask to check if this is a total internal reflection
         tir_mask = total_internal_reflection_mask.any(dim=-1)  # True if there is TIR

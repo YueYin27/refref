@@ -310,9 +310,6 @@ class R3FModel(Model):
 
                 exit_pts_h = current_pts
                 exit_dirs_h = current_dirs
-                # #region agent log
-                import json as _json_dbg; open('/workspace/.cursor/debug-a2f859.log','a').write(_json_dbg.dumps({"sessionId":"a2f859","hypothesisId":"H1+H5","location":"r3f_model.py:exit_snell","message":"TIR at exit surface","data":{"n_hit":int(n_hit),"tir_count":int(tir_at_exit.sum().item()),"tir_frac":float(tir_at_exit.float().mean().item()),"remaining_tir":int(remaining_tir.sum().item()),"ior":float(ior)}})+'\n')
-                # #endregion
 
                 # Project exit point onto camera ray to get t_back
                 t_back_h = ((exit_pts_h - cam_origins[hit_mask]) * cam_dirs_hat[hit_mask]).sum(-1)
@@ -372,9 +369,6 @@ class R3FModel(Model):
             # interior_rgb_h = exit_rgb_h  # DEBUG: bypass fg field, use bg exit color directly (density=0 equivalent)
             interior_rgb_h = renderings_hit[-1]['rgb']
             R_h = self._fresnel_R(cos_i[hit_mask].squeeze(-1), 1.0 / ior)
-            # #region agent log
-            import json as _json_dbg2; open('/workspace/.cursor/debug-a2f859.log','a').write(_json_dbg2.dumps({"sessionId":"a2f859","hypothesisId":"H2","location":"r3f_model.py:fresnel","message":"Fresnel R stats","data":{"R_min":float(R_h.min().item()),"R_max":float(R_h.max().item()),"R_mean":float(R_h.mean().item()),"R_eq1_count":int((R_h>=0.999).sum().item()),"n_hit":int(n_hit),"tir_count":int(tir_at_exit.sum().item())}})+'\n')
-            # #endregion
             comp_h = R_h * reflected_rgb_h + (1 - R_h) * interior_rgb_h
             final_rgb[hit_mask] = torch.clip(image.linear_to_srgb(comp_h), 0.0, 1.0)
 

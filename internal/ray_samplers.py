@@ -105,9 +105,6 @@ class RaySamples(TensorDataclass):
 
         # Use MeshRefraction.snell_fn (vectorized) with per-ray IORs for TIR behavior.
         directions_new, mask_tir = ray_refraction.snell_fn(normals, directions)
-        # #region agent log
-        import json as _json_dbg3; open('/workspace/.cursor/debug-a2f859.log','a').write(_json_dbg3.dumps({"sessionId":"a2f859","hypothesisId":"H3","location":"ray_samplers.py:first_refraction","message":"First refraction TIR","data":{"r_min":float(r.min().item()),"r_max":float(r.max().item()),"tir_count":int(mask_tir.sum().item()),"total_rays":int(mask_tir.numel())}})+'\n')
-        # #endregion
         distance = torch.norm(origins - intersections, dim=-1)
         origins_new = intersections - directions_new * distance.unsqueeze(-1)
         updated_origins, updated_directions, updated_positions, mask_update_first = ray_refraction.update_sample_points(
@@ -153,9 +150,6 @@ class RaySamples(TensorDataclass):
             directions_new, mask_tir = ray_refraction.snell_fn(
                 normals, directions_new[mask_list[i]].view(-1, num_samples_per_ray, 3)
             )
-            # #region agent log
-            import json as _json_dbg4; open('/workspace/.cursor/debug-a2f859.log','a').write(_json_dbg4.dumps({"sessionId":"a2f859","hypothesisId":"H3","location":"ray_samplers.py:bounce_"+str(i),"message":"Bounce refraction TIR","data":{"bounce":i,"r_min":float(r.min().item()),"r_max":float(r.max().item()),"tir_count":int(mask_tir.sum().item()),"total_rays":int(mask_tir.numel()),"mask_in_true":int(mask_in.sum().item())}})+'\n')
-            # #endregion
             distance = distance[mask_list[i]] + torch.norm(intersections_list[i][mask_list[i]] - intersections.view(-1, 3), dim=-1)
             origins_new = intersections - directions_new * distance.view(-1, num_samples_per_ray).unsqueeze(-1)
             distance = distance.reshape(-1, num_samples_per_ray)

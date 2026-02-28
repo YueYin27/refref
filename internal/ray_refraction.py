@@ -16,8 +16,6 @@
 import os
 
 import numpy as np
-import open3d as o3d
-import plotly.graph_objects as go
 import torch
 
 
@@ -82,43 +80,48 @@ class MeshRefraction(RayRefraction):
     def __init__(self, origins, directions, positions, r=None, ):
         # super().__init__(origins, directions, positions, r)
         self.origins = origins
-        self.directions = directions / torch.norm(directions, p=-1, dim=-1, keepdim=True)
+        self.directions = directions / torch.norm(directions, p=2, dim=-1, keepdim=True)
         self.positions = positions
         self.r = r
+        # #region agent log
+        import json as _json_dbg5; _norms_l2 = torch.norm(directions, p=2, dim=-1); _norms_minf = torch.norm(directions, p=-1, dim=-1); _norms_after = torch.norm(self.directions, p=2, dim=-1); open('/workspace/.cursor/debug-a2f859.log','a').write(_json_dbg5.dumps({"sessionId":"a2f859","hypothesisId":"H4","location":"ray_refraction.py:MeshRefraction.__init__","message":"Direction norm check","data":{"input_l2_mean":float(_norms_l2.mean().item()),"input_minf_mean":float(_norms_minf.mean().item()),"after_l2_mean":float(_norms_after.mean().item()),"after_l2_min":float(_norms_after.min().item()),"after_l2_max":float(_norms_after.max().item())}})+'\n')
+        # #endregion
 
-    # @functools.lru_cache(maxsize=128)
     def get_intersections_and_normals(self, scene, origins, directions, indices_prev):
         """
-        Get intersections and surface normals
+        Get intersections and surface normals using GPU BVH ray tracer.
 
         Args:
-            scene: the scene of the 3D object
+            scene: CudaRayTracer instance
+            origins: [num_rays, num_samples, 3] ray origins
+            directions: [num_rays, num_samples, 3] ray directions
+            indices_prev: indices of active rays from previous iteration
         """
         device = self.origins.device
+        prefix_shape = origins.shape[:-1]  # [num_rays, num_samples]
 
-        # Prepare rays
-        rays = torch.cat((origins, directions), dim=-1).cpu().numpy()  # Prepare rays in the required format
-        rays_o3d = o3d.core.Tensor(rays, dtype=o3d.core.Dtype.Float32)
+        # Flatten to [N, 3] for the CUDA raytracer
+        origins_flat = origins.reshape(-1, 3)
+        directions_flat = directions.reshape(-1, 3)
 
-        # Cast rays
-        results = scene.cast_rays(rays_o3d)  # Cast rays
+        results = scene.cast_rays(origins_flat, directions_flat, device=device)
 
-        # Convert results to PyTorch tensors and move to the correct device
-        t_hit = torch.tensor(results['t_hit'].cpu().numpy(), device=device).unsqueeze(-1)
+        # Reshape results back to [num_rays, num_samples, ...]
+        t_hit = results['t_hit'].reshape(*prefix_shape).unsqueeze(-1)
+        normals = results['primitive_normals'].reshape(*prefix_shape, 3)
+        mesh_idx = results['geometry_ids'].reshape(*prefix_shape)[:, 0]
+
         intersections = origins + t_hit * directions
-        normals = torch.tensor(results["primitive_normals"].cpu().numpy(), device=device)
-        mesh_idx = torch.tensor(results["geometry_ids"].cpu().numpy().astype(np.int32), device=device)[:, 0]
 
-        # check if the intersection is not 'inf' and create a mask for valid intersections and normals
+        # Check for valid intersections (not inf)
         mask = ~torch.isinf(t_hit).any(dim=-1)
-        mask[:, :] = mask[:, 0].unsqueeze(1).expand(-1, mask.shape[1])  # make sure each ray has the same mask
-        intersections = torch.where(mask.unsqueeze(-1), intersections, torch.tensor(float('nan'), device=device))  # mask the invalid intersections
-        normals = torch.where(mask.unsqueeze(-1), normals, torch.tensor(float('nan'), device=device))  # mask the invalid normals
-        mesh_idx = torch.where(mask[:, 0], mesh_idx, torch.tensor(-1, device=device))  # mask the invalid mesh indices
+        mask[:, :] = mask[:, 0].unsqueeze(1).expand(-1, mask.shape[1])
+        intersections = torch.where(mask.unsqueeze(-1), intersections, torch.tensor(float('nan'), device=device))
+        normals = torch.where(mask.unsqueeze(-1), normals, torch.tensor(float('nan'), device=device))
+        mesh_idx = torch.where(mask[:, 0], mesh_idx, torch.tensor(-1, dtype=mesh_idx.dtype, device=device))
 
-        # Create an indices tensor to store the indices of true values in mask
-        indices = torch.nonzero(torch.all(mask, dim=-1)).squeeze(dim=-1)  # the indices of the True values, [num_of_rays]
-        indices = indices_prev[indices]  # [num_of_rays], the indices of the previous True values
+        indices = torch.nonzero(torch.all(mask, dim=-1)).squeeze(dim=-1)
+        indices = indices_prev[indices]
 
         return intersections, normals, mask, indices, mesh_idx
 
@@ -171,9 +174,12 @@ class MeshRefraction(RayRefraction):
         l = l / torch.norm(l, p=2, dim=-1, keepdim=True)  # Normalize ray directions
         c = -torch.einsum('ijk, ijk -> ij', n, l)  # Cosine between normals and directions
 
-        # Adjust r's shape for broadcasting
+        # Adjust r's shape for broadcasting (match original scalar Snell fn behavior)
         sqrt_term = 1 - (r[:, None] ** 2) * (1 - c ** 2)
-        total_internal_reflection_mask = sqrt_term <= 0
+        total_internal_reflection_mask = sqrt_term < 1e-6
+        # #region agent log
+        import json as _json_dbg6; open('/workspace/.cursor/debug-a2f859.log','a').write(_json_dbg6.dumps({"sessionId":"a2f859","hypothesisId":"H3+H4","location":"ray_refraction.py:MeshRefraction.snell_fn","message":"snell_fn sqrt_term and TIR","data":{"r_min":float(r.min().item()),"r_max":float(r.max().item()),"c_min":float(c.min().item()),"c_max":float(c.max().item()),"sqrt_min":float(sqrt_term.min().item()),"sqrt_max":float(sqrt_term.max().item()),"tir_count":int(total_internal_reflection_mask.sum().item()),"total_elements":int(total_internal_reflection_mask.numel())}})+'\n')
+        # #endregion
 
         # create a mask to check if this is a total internal reflection
         tir_mask = total_internal_reflection_mask.any(dim=-1)  # True if there is TIR

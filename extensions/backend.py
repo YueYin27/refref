@@ -85,7 +85,10 @@ class CUDABackend(BaseBackend):
 
 
     def _get_backend_name(self):
-        funcs = []
+        # Ensure the built _cuda_backend.so can be found (e.g. when running ns-train from repo root)
+        cuda_ext_dir = os.path.join(cur_path, 'cuda')
+        if cuda_ext_dir not in sys.path:
+            sys.path.insert(0, cuda_ext_dir)
         try:
             backend_name = __import__('_cuda_backend')
         except ImportError:

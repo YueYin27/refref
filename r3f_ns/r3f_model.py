@@ -25,10 +25,8 @@ from typing import Literal
 
 import gin
 import numpy as np
-import open3d as o3d
 import torch
 import torch.nn.functional as F
-import trimesh
 from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.engine.callbacks import (
     TrainingCallback,
@@ -39,6 +37,7 @@ from nerfstudio.model_components.renderers import RGBRenderer
 from nerfstudio.model_components.scene_colliders import NearFarCollider
 from nerfstudio.models.base_model import Model, ModelConfig  # for custom Model
 from nerfstudio.utils import colormaps
+from nerfstudio.utils.rich_utils import CONSOLE
 from torch.nn import Parameter
 from torchmetrics import PeakSignalNoiseRatio
 from torchmetrics.functional import structural_similarity_index_measure
@@ -89,9 +88,8 @@ class R3FModel(Model):
         gin.parse_config_files_and_bindings(gin_files, None)
         config = Config()
 
-        # load mesh files and add to scene one by one
+        # load mesh files and build GPU BVH ray tracer
         ior_map = {"glass": 1.5, "water": 1.333, "diamond": 2.418, "air": 1.0, "alcohol": 1.36, "plastic": 1.45, "perfume": 1.46}
-        scene = o3d.t.geometry.RaycastingScene()  # initialize a scene
         mesh_files = str(self.kwargs['ply_path']).split()
         self.scene = None
         if mesh_files and self.config.stage != "bg":
@@ -99,21 +97,15 @@ class R3FModel(Model):
                 next((word for word in path.split('_') if word in ior_map), path.split('_')[-1].replace('.ply', ''))
                 for path in mesh_files
             ]
-            iors = [ior_map[material] for material in material_list]  # Map materials to IOR values
-            iors.append(float('nan'))  # Append NaN to the list
-            iors = torch.tensor(iors, dtype=torch.float32)  # Convert to PyTorch tensor
-            mesh_indices = []  # to store the idx of added meshes
-            for idx, ply_path in enumerate(mesh_files):
-                # Load and preprocess mesh
-                mesh = trimesh.load_mesh(ply_path)
-                vertices_tensor = o3d.core.Tensor(mesh.vertices * self.kwargs['scale_factor'], dtype=o3d.core.Dtype.Float32)
-                triangles_tensor = o3d.core.Tensor(mesh.faces, dtype=o3d.core.Dtype.UInt32)
-                mesh_index = scene.add_triangles(vertices_tensor, triangles_tensor)  # add mesh to scene and get index
-                mesh_indices.append(mesh_index)
-            self.scene = scene
-            self.iors = iors
-            self.mesh_indices = mesh_indices
-            self.scene = {"scene": scene, "iors": iors, "mesh_indices": mesh_indices}
+            iors = [ior_map[material] for material in material_list]
+            iors.append(float('nan'))
+            iors = torch.tensor(iors, dtype=torch.float32)
+            from internal.cuda_raytracer import CudaRayTracer
+            cuda_rt = CudaRayTracer(mesh_files, scale_factor=self.kwargs['scale_factor'])
+            CONSOLE.print("Using GPU BVH ray tracer for foreground stage.")
+            mesh_indices = list(range(len(mesh_files)))
+            # Store scalar IOR to avoid per-iteration GPU sync (.item()) in fg render.
+            self.scene = {"scene": cuda_rt, "iors": iors, "ior0": float(iors[0]), "mesh_indices": mesh_indices}
 
         self.r3f = r3f(config=config)
 
@@ -223,23 +215,21 @@ class R3FModel(Model):
         """Full rendering pipeline for fg stage: fg field (interior) + frozen bg field (exit/reflected).
         Only runs fg field on rays that hit the object; non-hitting rays use the frozen bg field directly."""
         device = batch['origins'].device
-        scene_o3d = self.scene['scene']
-        ior = self.scene['iors'][0].item()
+        cuda_rt = self.scene['scene']
+        ior = self.scene.get('ior0', float(self.scene['iors'][0]))
         N = batch['origins'].shape[0]
 
         cam_origins = batch['origins']          # [N, 3]
         cam_dirs = batch['directions']          # [N, 3] (scaled by directions_norm)
         cam_dirs_hat = F.normalize(cam_dirs, dim=-1)
 
-        # ── Step 1: Pre-compute entry/exit geometry via Open3D ──
+        # ── Step 1: Pre-compute entry/exit geometry via CUDA BVH ──
         with torch.no_grad():
-            rays_np = torch.cat([cam_origins, cam_dirs_hat], dim=-1).detach().cpu().numpy()
-            rays_o3d = o3d.core.Tensor(rays_np, dtype=o3d.core.Dtype.Float32)
-            result_entry = scene_o3d.cast_rays(rays_o3d)
+            result_entry = cuda_rt.cast_rays(cam_origins, cam_dirs_hat, device=device)
 
-            t_entry = torch.from_numpy(result_entry['t_hit'].numpy()).to(device)
-            entry_normals = torch.from_numpy(result_entry['primitive_normals'].numpy()).to(device)
-            hit_mask = t_entry < 1e9
+            t_entry = result_entry['t_hit']
+            entry_normals = result_entry['primitive_normals']
+            hit_mask = ~torch.isinf(t_entry)
             n_hit = hit_mask.sum().item()
 
             entry_points = cam_origins + t_entry.unsqueeze(-1) * cam_dirs_hat
@@ -257,7 +247,6 @@ class R3FModel(Model):
             refracted_dirs, _ = self._snell_refract(cam_dirs_hat, entry_normals, 1.0 / ior)
 
         # ── Step 2: Query frozen BG field for non-hitting camera rays ──
-        # Use the original scaled directions (not normalized) to match bg field training
         final_rgb = torch.zeros(N, 3, device=device)
         with torch.no_grad():
             if n_hit < N:
@@ -276,50 +265,83 @@ class R3FModel(Model):
 
         if n_hit > 0:
             with torch.no_grad():
-                # Safe tensors (only hitting rays from here)
                 entry_pts_h = entry_points[hit_mask]
                 refr_dirs_h = refracted_dirs[hit_mask]
+                n_hit = entry_pts_h.shape[0]
 
                 # Cast refracted ray to find exit point
                 eps_geom = 1e-4
-                rays_inner = torch.cat([entry_pts_h + eps_geom * refr_dirs_h, refr_dirs_h], dim=-1)
-                result_exit = scene_o3d.cast_rays(
-                    o3d.core.Tensor(rays_inner.detach().cpu().numpy(), dtype=o3d.core.Dtype.Float32))
+                result_exit = cuda_rt.cast_rays(
+                    entry_pts_h + eps_geom * refr_dirs_h, refr_dirs_h, device=device)
 
-                t_inner = torch.from_numpy(result_exit['t_hit'].numpy()).to(device)
-                exit_normals_raw = torch.from_numpy(result_exit['primitive_normals'].numpy()).to(device)
+                t_inner = result_exit['t_hit']
+                exit_normals_raw = result_exit['primitive_normals']
                 exit_pts_h = entry_pts_h + (eps_geom + t_inner.unsqueeze(-1)) * refr_dirs_h
 
                 # Orient exit normals towards interior
                 cos_exit_raw = -(refr_dirs_h * exit_normals_raw).sum(-1, keepdim=True)
                 exit_normals = torch.where(cos_exit_raw < 0, -exit_normals_raw, exit_normals_raw)
 
-                # Exit direction (object -> air)
-                exit_dirs_h, _ = self._snell_refract(refr_dirs_h, exit_normals, ior / 1.0)
+                # Exit direction (object -> air), with TIR bounce loop
+                exit_dirs_h, tir_at_exit = self._snell_refract(refr_dirs_h, exit_normals, ior / 1.0)
+
+                remaining_tir = tir_at_exit.clone()
+                current_pts = exit_pts_h.clone()
+                current_dirs = exit_dirs_h.clone()
+                for _bounce in range(10):
+                    if not remaining_tir.any():
+                        break
+                    tir_idx = remaining_tir
+                    result_bounce = cuda_rt.cast_rays(
+                        current_pts[tir_idx] + eps_geom * current_dirs[tir_idx],
+                        current_dirs[tir_idx], device=device)
+                    t_bounce = result_bounce['t_hit']
+                    bounce_normals_raw = result_bounce['primitive_normals']
+                    bounce_pts = current_pts[tir_idx] + (eps_geom + t_bounce.unsqueeze(-1)) * current_dirs[tir_idx]
+                    cos_b = -(current_dirs[tir_idx] * bounce_normals_raw).sum(-1, keepdim=True)
+                    bounce_normals = torch.where(cos_b < 0, -bounce_normals_raw, bounce_normals_raw)
+                    bounce_exit_dirs, bounce_tir = self._snell_refract(
+                        current_dirs[tir_idx], bounce_normals, ior / 1.0)
+                    current_pts[tir_idx] = bounce_pts
+                    current_dirs[tir_idx] = bounce_exit_dirs
+                    still_tir = torch.zeros_like(remaining_tir)
+                    still_tir[tir_idx] = bounce_tir
+                    remaining_tir = still_tir
+
+                exit_pts_h = current_pts
+                exit_dirs_h = current_dirs
+                # #region agent log
+                import json as _json_dbg; open('/workspace/.cursor/debug-a2f859.log','a').write(_json_dbg.dumps({"sessionId":"a2f859","hypothesisId":"H1+H5","location":"r3f_model.py:exit_snell","message":"TIR at exit surface","data":{"n_hit":int(n_hit),"tir_count":int(tir_at_exit.sum().item()),"tir_frac":float(tir_at_exit.float().mean().item()),"remaining_tir":int(remaining_tir.sum().item()),"ior":float(ior)}})+'\n')
+                # #endregion
 
                 # Project exit point onto camera ray to get t_back
                 t_back_h = ((exit_pts_h - cam_origins[hit_mask]) * cam_dirs_hat[hit_mask]).sum(-1)
 
-                # Query bg field for exit-ray colors
+                # Query frozen BG field for both exit and reflected rays in one batched call.
                 ray_eps = 1e-3
-                exit_rgb_h = self._query_bg_field(
-                    exit_pts_h + ray_eps * exit_dirs_h, exit_dirs_h,
-                    batch['radii'][hit_mask], batch['cam_idx'][hit_mask],
-                    torch.full((n_hit, 1), 0.01, device=device),
-                    batch['far'][hit_mask])
+                radii_h = batch['radii'][hit_mask]
+                cam_idx_h = batch['cam_idx'][hit_mask]
+                far_h = batch['far'][hit_mask]
+                near_h = torch.full((n_hit, 1), 0.01, device=device)
 
-                # Query bg field for reflected-ray colors
-                reflected_rgb_h = self._query_bg_field(
-                    entry_pts_h + 1e-3 * reflected_dirs[hit_mask], reflected_dirs[hit_mask],
-                    batch['radii'][hit_mask], batch['cam_idx'][hit_mask],
-                    torch.full((n_hit, 1), 0.01, device=device),
-                    batch['far'][hit_mask])
+                bg_origins = torch.cat(
+                    [exit_pts_h + ray_eps * exit_dirs_h, entry_pts_h + ray_eps * reflected_dirs[hit_mask]],
+                    dim=0,
+                )
+                bg_dirs = torch.cat([exit_dirs_h, reflected_dirs[hit_mask]], dim=0)
+                bg_radii = torch.cat([radii_h, radii_h], dim=0)
+                bg_cam_idx = torch.cat([cam_idx_h, cam_idx_h], dim=0)
+                bg_near = torch.cat([near_h, near_h], dim=0)
+                bg_far = torch.cat([far_h, far_h], dim=0)
+
+                bg_rgb = self._query_bg_field(bg_origins, bg_dirs, bg_radii, bg_cam_idx, bg_near, bg_far)
+                exit_rgb_h, reflected_rgb_h = bg_rgb[:n_hit], bg_rgb[n_hit:]
 
             # ── Step 4: Constrain near/far and build hitting-only batch ──
             near_offset = 0.05
             far_offset = 0.05
             hit_near = (t_entry[hit_mask] - near_offset).clamp(min=1e-3).unsqueeze(-1)
-            hit_far = (t_back_h + far_offset).clamp(max=batch['far'].max().item()).unsqueeze(-1)
+            hit_far = torch.minimum((t_back_h + far_offset), batch['far'].max()).unsqueeze(-1)
             hit_far = torch.max(hit_far, hit_near + 0.02)
 
             batch_hit = {
@@ -350,6 +372,9 @@ class R3FModel(Model):
             # interior_rgb_h = exit_rgb_h  # DEBUG: bypass fg field, use bg exit color directly (density=0 equivalent)
             interior_rgb_h = renderings_hit[-1]['rgb']
             R_h = self._fresnel_R(cos_i[hit_mask].squeeze(-1), 1.0 / ior)
+            # #region agent log
+            import json as _json_dbg2; open('/workspace/.cursor/debug-a2f859.log','a').write(_json_dbg2.dumps({"sessionId":"a2f859","hypothesisId":"H2","location":"r3f_model.py:fresnel","message":"Fresnel R stats","data":{"R_min":float(R_h.min().item()),"R_max":float(R_h.max().item()),"R_mean":float(R_h.mean().item()),"R_eq1_count":int((R_h>=0.999).sum().item()),"n_hit":int(n_hit),"tir_count":int(tir_at_exit.sum().item())}})+'\n')
+            # #endregion
             comp_h = R_h * reflected_rgb_h + (1 - R_h) * interior_rgb_h
             final_rgb[hit_mask] = torch.clip(image.linear_to_srgb(comp_h), 0.0, 1.0)
 
@@ -574,5 +599,14 @@ class R3FModel(Model):
             metrics_dict["masked_psnr"] = float(masked_psnr)
 
         images_dict = {"img": combined_rgb, "accumulation": combined_acc, "depth": combined_depth}
+
+        # Move images to CPU and ensure [0, 1] for wandb/tensorboard (avoids black images from GPU tensors)
+        for key in ("img", "accumulation"):
+            images_dict[key] = images_dict[key].detach().cpu().clamp(0.0, 1.0)
+        depth_val = images_dict["depth"]
+        images_dict["depth"] = depth_val.detach().cpu()
+        d = images_dict["depth"]
+        if d.numel() > 0 and d.max() > d.min():
+            images_dict["depth"] = (d - d.min()) / (d.max() - d.min() + 1e-8)
 
         return metrics_dict, images_dict

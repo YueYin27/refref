@@ -6,6 +6,8 @@ _src_path = os.path.dirname(os.path.abspath(__file__))
 
 nvcc_flags = [
     '-O3', '-std=c++14',
+    '--expt-extended-lambda',
+    '--expt-relaxed-constexpr',
     '-U__CUDA_NO_HALF_OPERATORS__', '-U__CUDA_NO_HALF_CONVERSIONS__', '-U__CUDA_NO_HALF2_OPERATORS__',
 ]
 
@@ -37,8 +39,14 @@ setup(
             sources=[os.path.join(_src_path, 'src', f) for f in [
                 'gridencoder.cu',
                 'pdf.cu',
+                'bvh.cu',
+                'raytracer.cu',
                 'bindings.cpp',
             ]],
+            include_dirs=[
+                os.path.join(_src_path, 'include'),
+                '/usr/include/eigen3',
+            ],
             extra_compile_args={
                 'cxx': c_flags,
                 'nvcc': nvcc_flags,

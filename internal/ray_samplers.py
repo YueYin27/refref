@@ -26,13 +26,10 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Literal, Optional, Tuple, Union, overload, List, Any
 
 import torch
-import trimesh
-import open3d as o3d
 from jaxtyping import Float, Int, Shaped
-from sympy.integrals.meijerint_doc import category
 from torch import Tensor, nn
 
-from internal.ray_refraction import MeshRefraction
+from internal.ray_refraction import MeshRefraction, RayRefraction
 from internal.ray_reflection import RayReflection
 from nerfstudio.utils.math import Gaussians, conical_frustum_to_gaussian
 from nerfstudio.utils.tensor_dataclass import TensorDataclass
@@ -97,14 +94,20 @@ class RaySamples(TensorDataclass):
 
         # 2. Get intersections and normals through the first refraction
         ray_refraction = MeshRefraction(origins, directions, positions)
-        intersections, normals, mask, indices, mesh_idx = ray_refraction.get_intersections_and_normals(scene, origins, directions, indices)
+        intersections, normals, mask, indices, mesh_idx = ray_refraction.get_intersections_and_normals(
+            scene, origins, directions, indices
+        )
         normals_first = normals.clone()
 
         n = iors[mesh_idx]
-        r = 1.0 / n # initialise r, assuming the ray starts from air
+        r = 1.0 / n  # initialise r, assuming the ray starts from air
         ray_refraction.r = r  # update r for this refraction
 
+        # Use MeshRefraction.snell_fn (vectorized) with per-ray IORs for TIR behavior.
         directions_new, mask_tir = ray_refraction.snell_fn(normals, directions)
+        # #region agent log
+        import json as _json_dbg3; open('/workspace/.cursor/debug-a2f859.log','a').write(_json_dbg3.dumps({"sessionId":"a2f859","hypothesisId":"H3","location":"ray_samplers.py:first_refraction","message":"First refraction TIR","data":{"r_min":float(r.min().item()),"r_max":float(r.max().item()),"tir_count":int(mask_tir.sum().item()),"total_rays":int(mask_tir.numel())}})+'\n')
+        # #endregion
         distance = torch.norm(origins - intersections, dim=-1)
         origins_new = intersections - directions_new * distance.unsqueeze(-1)
         updated_origins, updated_directions, updated_positions, mask_update_first = ray_refraction.update_sample_points(
@@ -122,10 +125,12 @@ class RaySamples(TensorDataclass):
         # 3. Get intersections and normals through the following refractions
         i = 0
         while True:
-            ray_refraction = MeshRefraction(updated_origins[mask_list[i]].view(-1, num_samples_per_ray, 3),
-                                            updated_directions[mask_list[i]].view(-1, num_samples_per_ray, 3),
-                                            updated_positions[mask_list[i]].view(-1, num_samples_per_ray, 3),
-                                            r)
+            ray_refraction = MeshRefraction(
+                updated_origins[mask_list[i]].view(-1, num_samples_per_ray, 3),
+                updated_directions[mask_list[i]].view(-1, num_samples_per_ray, 3),
+                updated_positions[mask_list[i]].view(-1, num_samples_per_ray, 3),
+                r,
+            )
             intersections_offset = intersections_list[i] + directions_new * epsilon
             intersections, normals, mask, indices, mesh_idx = ray_refraction.get_intersections_and_normals(scene,
                                                                                                  intersections_offset[mask_list[i]].view(-1, num_samples_per_ray, 3),
@@ -137,11 +142,20 @@ class RaySamples(TensorDataclass):
             normals = torch.where((cos_theta < 0)[:, None, None], normals, -normals)
             # normals = torch.where(mask_in[:, None, None], -normals, normals)
 
-            n = iors[mesh_idx]
+            valid_hit = (mesh_idx >= 0)
+            safe_idx = mesh_idx.clamp(min=0)
+            n = iors[safe_idx]
+            n = torch.where(valid_hit, n, torch.ones_like(n))
             r = torch.where(mask_in, n / 1.0, 1.0 / n)
             ray_refraction.r = r
 
-            directions_new, mask_tir = ray_refraction.snell_fn(normals, directions_new[mask_list[i]].view(-1, num_samples_per_ray, 3))  # negative normals because the ray is inside the surface
+            # Use MeshRefraction.snell_fn with current directions for subsequent bounces.
+            directions_new, mask_tir = ray_refraction.snell_fn(
+                normals, directions_new[mask_list[i]].view(-1, num_samples_per_ray, 3)
+            )
+            # #region agent log
+            import json as _json_dbg4; open('/workspace/.cursor/debug-a2f859.log','a').write(_json_dbg4.dumps({"sessionId":"a2f859","hypothesisId":"H3","location":"ray_samplers.py:bounce_"+str(i),"message":"Bounce refraction TIR","data":{"bounce":i,"r_min":float(r.min().item()),"r_max":float(r.max().item()),"tir_count":int(mask_tir.sum().item()),"total_rays":int(mask_tir.numel()),"mask_in_true":int(mask_in.sum().item())}})+'\n')
+            # #endregion
             distance = distance[mask_list[i]] + torch.norm(intersections_list[i][mask_list[i]] - intersections.view(-1, 3), dim=-1)
             origins_new = intersections - directions_new * distance.view(-1, num_samples_per_ray).unsqueeze(-1)
             distance = distance.reshape(-1, num_samples_per_ray)

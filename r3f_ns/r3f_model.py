@@ -294,7 +294,9 @@ class R3FModel(Model):
                 remaining_tir = tir_at_exit.clone()
                 current_pts = exit_pts_h.clone()
                 current_dirs = exit_dirs_h.clone()
-                for _bounce in range(self.config.max_refracted_bounces - 1):  # entry = 1, TIR = rest
+                bounce_count = torch.zeros(n_hit, dtype=torch.int32, device=device)
+                max_bounces = self.config.max_refracted_bounces - 1  # entry = 1, TIR = rest
+                for _bounce in range(max_bounces):
                     if not remaining_tir.any():
                         break
                     tir_idx = remaining_tir
@@ -312,6 +314,10 @@ class R3FModel(Model):
                     current_dirs[tir_idx] = bounce_exit_dirs
                     # Accumulate TIR segment length
                     path_length[tir_idx] += eps_geom + t_bounce
+                    # Track per-ray bounce count; force-terminate rays that miss
+                    # (inf t_bounce likely from mesh noise) to avoid wasting iterations
+                    bounce_count[tir_idx] += 1
+                    bounce_tir = bounce_tir & ~torch.isinf(t_bounce)
                     still_tir = torch.zeros_like(remaining_tir)
                     still_tir[tir_idx] = bounce_tir
                     remaining_tir = still_tir

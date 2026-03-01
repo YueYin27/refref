@@ -281,6 +281,9 @@ class R3FModel(Model):
                 exit_normals_raw = result_exit['primitive_normals']
                 exit_pts_h = entry_pts_h + (eps_geom + t_inner.unsqueeze(-1)) * refr_dirs_h
 
+                # Accumulated physical path length inside the object
+                path_length = eps_geom + t_inner  # [n_hit]
+
                 # Orient exit normals towards interior
                 cos_exit_raw = -(refr_dirs_h * exit_normals_raw).sum(-1, keepdim=True)
                 exit_normals = torch.where(cos_exit_raw < 0, -exit_normals_raw, exit_normals_raw)
@@ -307,6 +310,8 @@ class R3FModel(Model):
                         current_dirs[tir_idx], bounce_normals, ior / 1.0)
                     current_pts[tir_idx] = bounce_pts
                     current_dirs[tir_idx] = bounce_exit_dirs
+                    # Accumulate TIR segment length
+                    path_length[tir_idx] += eps_geom + t_bounce
                     still_tir = torch.zeros_like(remaining_tir)
                     still_tir[tir_idx] = bounce_tir
                     remaining_tir = still_tir
@@ -314,8 +319,20 @@ class R3FModel(Model):
                 exit_pts_h = current_pts
                 exit_dirs_h = current_dirs
 
-                # Project exit point onto camera ray to get t_back
-                t_back_h = ((exit_pts_h - cam_origins[hit_mask]) * cam_dirs_hat[hit_mask]).sum(-1)
+                # Replace inf/NaN exit points with entry fallback (ray treated as transparent)
+                invalid_exit = torch.isinf(exit_pts_h).any(dim=-1) | torch.isnan(exit_pts_h).any(dim=-1)
+                if invalid_exit.any():
+                    exit_pts_h[invalid_exit] = entry_pts_h[invalid_exit]
+                    exit_dirs_h[invalid_exit] = cam_dirs_hat[hit_mask][invalid_exit]
+
+                # Clamp path_length to avoid inf/NaN from missed ray casts
+                max_path = (batch['far'].max() - t_entry[hit_mask]).clamp(min=0.1)
+                bad_path = torch.isinf(path_length) | torch.isnan(path_length)
+                path_length = torch.where(bad_path, max_path, path_length)
+                path_length = torch.clamp(path_length, max=max_path)
+
+                # Use accumulated in-object path length as effective far distance
+                t_back_h = t_entry[hit_mask] + path_length
 
                 # Query frozen BG field for both exit and reflected rays in one batched call.
                 ray_eps = 1e-3
@@ -335,6 +352,7 @@ class R3FModel(Model):
                 bg_far = torch.cat([far_h, far_h], dim=0)
 
                 bg_rgb = self._query_bg_field(bg_origins, bg_dirs, bg_radii, bg_cam_idx, bg_near, bg_far)
+                bg_rgb = torch.nan_to_num(bg_rgb, nan=1.0, posinf=1.0, neginf=0.0)
                 exit_rgb_h, reflected_rgb_h = bg_rgb[:n_hit], bg_rgb[n_hit:]
 
             # ── Step 4: Constrain near/far and build hitting-only batch ──

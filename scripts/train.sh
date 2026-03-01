@@ -1,77 +1,80 @@
-#!/usr/bin/env bash
-#SBATCH --job-name=train
-#SBATCH --mail-type=END,FAIL
-#SBATCH --ntasks=1
-#SBATCH --mem=24gb
-#SBATCH --gres=gpu:a6000:1
-#SBATCH --account=optimalvision
-#SBATCH --qos=gpu-b
-#SBATCH --partition=gpu
-##SBATCH --partition=teaching
-#SBATCH --output=logs/%j.log
-#SBATCH --time=5-00:00:00
+#################################### Stage 1: BG (background) ####################################
+BG=env_map_scene
+for shape_folder in /home/projects/RefRef/image_data/$BG/*/; do
+    shape_type=$(basename "$shape_folder")
+    echo "Processing: $shape_type"
+    for scene_folder in $shape_folder/*/; do
+        dataset_name=$(basename "$scene_folder")
+        dataset_path="$scene_folder"
 
-pwd; hostname; date
-singularity shell --nv /opt/apps/containers/conda/conda-nvidia-22.04-latest.sif
-CONDA_INIT_SCRIPT=/home/projects/u7535192/anaconda3/etc/profile.d/conda.sh
-source $CONDA_INIT_SCRIPT
-conda activate nerfstudio-refref
-echo "Training started."
-export 'PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512'
-export HF_CACHE_DIR="/home/projects/u7535192/.cache/huggingface"
+        # Skip if ckpt step-000009999.ckpt exits (e.g., /home/projects/u7535192/projects/refref/outputs/bg/r3f_ampoule_hdr/r3f/2026-02-28_041915/nerfstudio_models/step-000009999.ckpt)
+        if ls outputs/bg/r3f_${dataset_name}/r3f/*/nerfstudio_models/step-000009999.ckpt 2>/dev/null | grep -q .; then
+            echo "Skipping $dataset_name: checkpoint already exists"
+            continue
+        fi
 
-cd ..
-ns-train r3f refref-data --help
-dataset_name="ball"
-ply_files="/home/projects/u7535192/projects/refref/data/real-data/glass_glass.ply"
+        echo "Training on dataset: $dataset_name"
+        WANDB_TMPDIR=$(mktemp -d)
+        export WANDB_DIR="$WANDB_TMPDIR"
 
-WANDB_TMPDIR=$(mktemp -d)
-export WANDB_DIR="$WANDB_TMPDIR"
+        ns-train r3f --pipeline.stage bg \
+                    --machine.device-type cuda \
+                    --machine.num-devices 1 \
+                    --project-name r3f \
+                    --experiment-name "r3f_${dataset_name}" \
+                    --pipeline.model.gin-file "configs/refref_hdr.gin" \
+                    --pipeline.model.background-color random \
+                    --max-num-iterations 10000 \
+                    --steps_per_eval_image 1000 \
+                    --vis wandb \
+                    --data "$dataset_path" \
+                    --output-dir "outputs/bg" \
+                blender-refref-data \
+                    --scale-factor 0.1
 
-ns-train r3f --pipeline.stage bg \
-            --machine.device-type cuda \
-            --machine.num-devices 1 \
-            --project-name r3f \
-            --experiment-name "r3f_${dataset_name}" \
-            --pipeline.model.gin-file "configs/refref.gin" \
-            --pipeline.model.background-color random \
-            --max-num-iterations 25000 \
-            --steps_per_eval_image 500 \
-            --vis wandb \
-            --data "/workspace/image_data/textured_cube_scene/single-convex/ball" \
-            --output-dir "outputs" \
-        blender-refref-data \
-            --scale-factor 0.1
+    rm -rf "$WANDB_TMPDIR"
+    rm -rf outputs/bg/r3f_*/r3f/*/wandb
+    done
+done
 
-rm -rf "$WANDB_TMPDIR"
-rm -rf outputs/r3f_*/r3f/*/wandb
+#################################### Stage 2: FG (foreground) ####################################
+BG=env_map_scene
+for shape_folder in /home/projects/RefRef/image_data/$BG/*/; do
+    shape_type=$(basename "$shape_folder")
+    echo "Processing: $shape_type"
+    for scene_folder in $shape_folder/*/; do
+        dataset_name=$(basename "$scene_folder")
+        dataset_path="$scene_folder"
 
-python extract_mesh_stage1.py --cfg data/model/ball_coloured/ball_coloured.yaml
+        # Skip if ckpt step-000009999.ckpt exits
+        if ls outputs/fg/r3f_${dataset_name}/r3f/*/nerfstudio_models/step-000009999.ckpt 2>/dev/null | grep -q .; then
+            echo "Skipping $dataset_name: checkpoint already exists"
+            continue
+        fi
+        
+        bg_ckpt=$(find outputs/bg/r3f_${dataset_name}/r3f/*/ -type f -name "*.ckpt" | head -n 1)
+        ply_files=$(find outputs/meshes/ -type f -name "${dataset_name%_@(hdr|sphere)}_glass.ply" | tr '\n' ' ')
+        WANDB_TMPDIR=$(mktemp -d)
+        export WANDB_DIR="$WANDB_TMPDIR"
 
-# ── Stage 2: FG (foreground in-object field) ──
-# Set bg_ckpt to the checkpoint from the bg stage above
-bg_ckpt="outputs/r3f_ball/r3f/2026-02-26_121600/nerfstudio_models/step-000010000.ckpt"
-ply_files="outputs/r3f_ball/r3f/2026-02-26_121600/ball_glass.ply"
-WANDB_TMPDIR=$(mktemp -d)
-export WANDB_DIR="$WANDB_TMPDIR"
-
-ns-train r3f --pipeline.stage fg \
-            --pipeline.bg-checkpoint-path "$bg_ckpt" \
-            --machine.device-type cuda \
-            --machine.num-devices 1 \
-            --project-name r3f \
-            --experiment-name "r3f_${dataset_name}_fg" \
-            --pipeline.model.gin-file "configs/refref.gin" \
-            --pipeline.model.background-color random \
-            --max-num-iterations 25000 \
-            --steps_per_eval_image 100 \
-            --vis wandb \
-            --data "/workspace/image_data/textured_cube_scene/single-convex/ball" \
-            --output-dir "outputs" \
-        blender-refref-data \
-            --scale-factor 0.1 \
-            --ply-path "${ply_files}"
-
-rm -rf "$WANDB_TMPDIR"
-rm -rf outputs/r3f_*/r3f/*/wandb
-
+        ns-train r3f --pipeline.stage fg \
+                    --pipeline.bg-checkpoint-path "$bg_ckpt" \
+                    --machine.device-type cuda \
+                    --machine.num-devices 1 \
+                    --project-name r3f \
+                    --experiment-name "r3f_${dataset_name}_fg" \
+                    --pipeline.model.gin-file "configs/refref_fg.gin" \
+                    --pipeline.model.background-color random \
+                    --max-num-iterations 10000 \
+                    --steps_per_eval_image 1000 \
+                    --vis wandb \
+                    --data "$dataset_path" \
+                    --output-dir "outputs/fg" \
+                blender-refref-data \
+                    --scale-factor 0.1 \
+                    --ply-path "${ply_files}"
+    
+    done
+    rm -rf "$WANDB_TMPDIR"
+    rm -rf outputs/fg/r3f_*/r3f/*/wandb
+done

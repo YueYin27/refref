@@ -112,6 +112,15 @@ def load_split_image(path: str) -> (torch.Tensor, torch.Tensor):
     return gt_rgb, pred_rgb
 
 
+def load_split_distance_image(path: str) -> (torch.Tensor, torch.Tensor):
+    """Load a combined distance map image (same layout as RGB: left=GT, right=pred) and split it."""
+    img = load_image(path, mode="L")
+    # Split into left (GT) and right (pred), same 800-pixel split as load_split_image
+    gt_dist = img[:, :800, :]
+    pred_dist = img[:, 800:, :]
+    return gt_dist, pred_dist
+
+
 def load_mask(path: str) -> torch.Tensor:
     mask = Image.open(path).convert("L")
     mask = torch.from_numpy(np.array(mask)).float()
@@ -127,8 +136,7 @@ if __name__ == "__main__":
         # Generate filenames
         rgb_path = os.path.join(args.result_dir, "rgb_images", f"r_{idx}.png")
         mask_path = os.path.join(args.mask_dir, f"r_{idx}_mask_0000.png")
-        pred_dist_path = os.path.join(args.result_dir, "distance_maps", f"r_{idx}_depth_pred.png")
-        gt_dist_path = os.path.join(args.result_dir, "distance_maps", f"r_{idx}_depth_gt.png")
+        dist_path = os.path.join(args.result_dir, "distance_maps", f"r_{idx}_dist.png")
 
         # Load data
         try:
@@ -148,16 +156,15 @@ if __name__ == "__main__":
         }
 
         try:
-            pred_dist = load_image(pred_dist_path, mode="L")
-            gt_dist = load_image(gt_dist_path, mode="L")
+            gt_dist, pred_dist = load_split_distance_image(dist_path)
             dist_metrics = compute_distance_metrics(pred_dist, gt_dist, mask)
         except FileNotFoundError as e:
             print(f"Distance map file not found: {e}, skipping distance metrics for index {idx}")
 
         # Check shape consistency
         assert pred_rgb.shape == gt_rgb.shape, f"RGB shape mismatch in {rgb_path}"
-        if 'dist_mse' in dist_metrics and not np.isnan(dist_metrics['dist_mse']):
-            assert pred_dist.shape == gt_dist.shape, f"Distance map shape mismatch: {pred_dist_path} vs {gt_dist_path}"
+        if 'dist_rmse' in dist_metrics and not np.isnan(dist_metrics['dist_rmse']):
+            assert pred_dist.shape == gt_dist.shape, f"Distance map shape mismatch in {dist_path}"
         if mask is not None:
             assert mask.shape[:2] == gt_rgb.shape[:2], f"Mask shape mismatch: {mask_path}"
 

@@ -4,6 +4,8 @@ import numpy as np
 import torch
 import trimesh
 
+from internal.mesh_preprocess import preprocess_mesh
+
 _ext_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'extensions', 'cuda')
 if _ext_dir not in sys.path:
     sys.path.insert(0, _ext_dir)
@@ -18,7 +20,8 @@ class CudaRayTracer:
     cast_rays() interface, but runs entirely on the GPU.
     """
 
-    def __init__(self, mesh_files, scale_factor=1.0):
+    def __init__(self, mesh_files, scale_factor=1.0,
+                 convexity_threshold=0.02, smooth_iterations=10):
         all_vertices = []
         all_faces = []
         all_geo_ids = []
@@ -26,6 +29,11 @@ class CudaRayTracer:
 
         for mesh_idx, ply_path in enumerate(mesh_files):
             mesh = trimesh.load_mesh(ply_path)
+            mesh = preprocess_mesh(
+                mesh,
+                convexity_threshold=convexity_threshold,
+                smooth_iterations=smooth_iterations,
+            )
             verts = np.array(mesh.vertices, dtype=np.float32) * scale_factor
             faces = np.array(mesh.faces, dtype=np.uint32)
 

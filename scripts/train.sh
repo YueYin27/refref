@@ -39,7 +39,7 @@ done
 
 #################################### Stage 2: FG (foreground) ####################################
 BG=env_map_scene
-for shape_folder in /home/projects/RefRef/image_data/$BG/*/; do
+for shape_folder in /home/projects/RefRef/image_data/$BG/s*/; do
     shape_type=$(basename "$shape_folder")
     echo "Processing: $shape_type"
     for scene_folder in $shape_folder/*/; do
@@ -53,7 +53,8 @@ for shape_folder in /home/projects/RefRef/image_data/$BG/*/; do
         fi
         
         bg_ckpt=$(find outputs/bg/r3f_${dataset_name}/r3f/*/ -type f -name "*.ckpt" | head -n 1)
-        ply_files=$(find outputs/meshes/ -type f -name "${dataset_name%_@(hdr|sphere)}_glass.ply" | tr '\n' ' ')
+        ply_files=$(find outputs/meshes/ -type f -name "${dataset_name%_hdr}_glass.ply" | tr '\n' ' ')
+
         WANDB_TMPDIR=$(mktemp -d)
         export WANDB_DIR="$WANDB_TMPDIR"
 
@@ -63,6 +64,8 @@ for shape_folder in /home/projects/RefRef/image_data/$BG/*/; do
                     --machine.num-devices 1 \
                     --project-name r3f \
                     --experiment-name "r3f_${dataset_name}_fg" \
+                    --pipeline.bg-far 1000 \
+                    --pipeline.bg-opaque-background True \
                     --pipeline.model.gin-file "configs/refref_fg.gin" \
                     --pipeline.model.background-color random \
                     --max-num-iterations 10000 \

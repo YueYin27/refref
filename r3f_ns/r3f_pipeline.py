@@ -65,6 +65,12 @@ class R3FPipelineConfig(VanillaPipelineConfig):
     """Training stage: 'bg' trains background only (masking out foreground object), 'fg' trains foreground in-object field."""
     bg_checkpoint_path: Optional[str] = None
     """Path to background field checkpoint for fg stage (e.g., .../step-000010000.ckpt)."""
+    bg_far: Optional[float] = None
+    """Far plane used when training the BG model. Required for unbounded scenes
+    where BG was trained with a larger far than FG (e.g. BG far=1000, FG far=15)."""
+    bg_opaque_background: bool = True
+    """Whether frozen BG field should use opaque background when queried in fg stage.
+    Should match BG training config (refref_hdr.gin uses True)."""
 
 
 class R3FPipeline(VanillaPipeline):
@@ -92,6 +98,9 @@ class R3FPipeline(VanillaPipeline):
         config.model.stage = config.stage
         if config.bg_checkpoint_path is not None:
             config.model.bg_checkpoint_path = config.bg_checkpoint_path
+        if config.bg_far is not None:
+            config.model.bg_far = config.bg_far
+        config.model.bg_opaque_background = config.bg_opaque_background
 
         self.datamanager: DataManager = config.datamanager.setup(
             device=device, test_mode=test_mode, world_size=world_size, local_rank=local_rank

@@ -67,6 +67,13 @@ class R3FModelConfig(ModelConfig):
     """Training stage: 'bg' trains background only, 'fg' trains foreground in-object field."""
     bg_checkpoint_path: str = None
     """Path to background field checkpoint for fg stage."""
+    bg_far: float = None
+    """Far plane used when training the BG model. Required for unbounded scenes
+    where the BG gin config has a different 'far' than the FG gin config (e.g.
+    BG trained with far=1000, FG with far=15). If None, uses the FG config's far."""
+    bg_opaque_background: bool = True
+    """Whether frozen BG field should use opaque background when queried in fg stage.
+    Should match BG training config (refref_hdr.gin uses True)."""
     max_refracted_bounces: int = 12
     """Max refracted bounces (entry + TIR) in ray tracing; one TIR counts as one bounce (default 12)."""
     _target: Type = field(default_factory=lambda: R3FModel)
@@ -123,10 +130,23 @@ class R3FModel(Model):
                 if k.startswith('_model.r3f.')
             }
             self.r3f_bg.load_state_dict(bg_state)
+            self.r3f_bg.opaque_background = self.config.bg_opaque_background
             self.r3f_bg.eval()
             for p in self.r3f_bg.parameters():
                 p.requires_grad_(False)
-            print(f"Loaded frozen BG field from {self.config.bg_checkpoint_path}")
+            # Store the BG model's far plane for querying; fall back to FG far if not specified.
+            self.bg_far = self.config.bg_far if self.config.bg_far is not None else config.far
+            if self.config.bg_far is not None:
+                print(
+                    f"Loaded frozen BG field from {self.config.bg_checkpoint_path} "
+                    f"(bg_far={self.bg_far}, bg_opaque_background={self.r3f_bg.opaque_background})"
+                )
+            else:
+                print(
+                    f"Loaded frozen BG field from {self.config.bg_checkpoint_path} "
+                    f"(bg_far not set, using fg far={self.bg_far}, "
+                    f"bg_opaque_background={self.r3f_bg.opaque_background})"
+                )
 
         self.collider = NearFarCollider(near_plane=self.r3f.config.near, far_plane=self.r3f.config.far)
         self.step = 0
@@ -192,7 +212,15 @@ class R3FModel(Model):
 
     def _query_bg_field(self, origins, directions, radii, cam_idx, near, far):
         """Query the frozen background field for a set of rays.
-        Always uses train_frac=1.0 since the bg field is fully trained."""
+        Always uses train_frac=1.0 since the bg field is fully trained.
+        Overrides far with self.bg_far so the ray warp matches BG training."""
+        # Use the BG model's original far plane to construct the correct ray warp.
+        # Without this, unbounded BG scenes (trained with large far, e.g. 1000)
+        # would be queried with the FG's small far (e.g. 15), missing all distant
+        # content and producing white output.
+        bg_far_val = getattr(self, 'bg_far', None)
+        if bg_far_val is not None:
+            far = torch.full_like(far, bg_far_val)
         bg_batch = {
             'origins': origins,
             'directions': directions,

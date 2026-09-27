@@ -1,0 +1,84 @@
+# Per-scene TNSR --cuboid-coordinates, in the OBJECT-CENTRED world frame that
+# scripts/tnsr_train_worker.sh trains in:
+#
+#     nerfstudio-data --data real_captures_centred/<bg>_<scene> \
+#         --orientation-method none --center_method none \
+#         --auto-scale-poses False --scale-factor 0.5
+#
+# These are NOT the boxes in run_other_methods.sh's raydeform section, nor TNSR's own
+# older --center_method focus boxes: that frame was ~3x smaller and differently centred.
+# Each box is the bounding box of a visual hull carved from the scene's SAM3 masks,
+# padded 5%. The trailing % is how much of the hull re-projects inside masks of views
+# that were NOT used to carve it. Regenerate with:
+#
+#     python scripts/carve_cuboids.py --orientation-method none --center-method none \
+#         --no-auto-scale --scale-factor 0.5 --pad 0.05 --min-half 0 --validate \
+#         real_captures_centred/*/
+#
+# scene                            x_min  y_min  z_min  x_max  y_max  z_max   hull-in-held-out-masks
+courtyard_bulb                   -0.259 -0.297 -0.456 0.259 0.260 0.380   # 99.9%
+courtyard_cocktail_shaker        -0.218 -0.179 -0.539 0.180 0.179 0.615   # 99.9%
+courtyard_dishwashing_liquid     -0.220 -0.179 -0.500 0.258 0.179 0.614   # 99.9%
+courtyard_glass_of_water         -0.179 -0.179 -0.259 0.179 0.179 0.259   # 99.9%
+courtyard_glass_with_straw       -0.179 -0.179 -0.296 0.179 0.179 0.182   # 96.6%
+courtyard_measuring_jug          -0.300 -0.337 -0.296 0.376 0.299 0.182   # 99.8%
+courtyard_perfume                -0.139 -0.139 -0.261 0.139 0.139 0.336   # 99.2%
+courtyard_perfume_set            -0.455 -0.298 -0.300 0.341 0.298 0.376   # 99.2%
+courtyard_pyramid                -0.218 -0.177 -0.101 0.180 0.101 0.177   # 99.3%
+courtyard_rabbit                 -0.218 -0.218 -0.340 0.180 0.180 0.416   # 99.9%
+courtyard_snow_globe             -0.259 -0.259 -0.382 0.259 0.259 0.533   # 99.9%
+courtyard_snow_globe1            -0.259 -0.259 -0.180 0.259 0.259 0.218   # 99.9%
+courtyard_sphere                 -0.259 -0.259 -0.220 0.259 0.259 0.258   # 100.0%
+courtyard_wine_bottle            -0.179 -0.179 -0.462 0.179 0.179 0.652   # 95.4%
+courtyard_wine_bottle_set        -0.376 -0.261 -0.495 0.300 0.336 0.381   # 99.0%
+living_room_bulb                 -0.262 -0.376 -0.304 0.414 0.300 0.531   # 99.9%
+living_room_cocktail_shaker      -0.299 -0.299 -0.731 0.337 0.337 0.542   # 99.9%
+living_room_dishwashing_liquid   -0.298 -0.179 -0.495 0.298 0.179 0.420   # 99.7%
+living_room_glass_of_water       -0.143 -0.297 -0.379 0.295 0.260 0.417   # 100.0%
+living_room_glass_with_straw     -0.338 -0.338 -0.412 0.338 0.338 0.185   # 97.6%
+living_room_measuring_jug        -0.535 -0.497 -0.495 0.459 0.497 0.381   # 99.9%
+living_room_perfume              -0.298 -0.219 -0.495 0.298 0.219 0.381   # 99.7%
+living_room_perfume_set          -0.261 -0.383 -0.452 0.375 0.572 0.225   # 98.6%
+living_room_pyramid              -0.378 -0.378 -0.185 0.378 0.378 0.412   # 99.3%
+living_room_rabbit               -0.297 -0.297 -0.535 0.260 0.260 0.459   # 99.9%
+living_room_snow_globe           -0.417 -0.339 -0.690 0.379 0.377 0.424   # 99.9%
+living_room_snow_globe1          -0.418 -0.418 -0.651 0.418 0.418 0.423   # 99.9%
+living_room_sphere               -0.418 -0.418 -0.379 0.418 0.418 0.417   # 99.9%
+living_room_wine_bottle          -0.220 -0.220 -0.333 0.258 0.258 0.144   # 99.9%
+living_room_wine_bottle_set      -0.381 -0.142 -0.498 0.495 0.256 0.536   # 98.3%
+lookout_deck_bulb                -0.298 -0.298 -0.346 0.298 0.298 0.649   # 99.9%
+lookout_deck_cocktail_shaker     -0.260 -0.260 -0.614 0.297 0.297 0.500   # 99.9%
+lookout_deck_dishwashing_liquid  -0.179 -0.180 -0.460 0.179 0.218 0.574   # 99.9%
+lookout_deck_glass_of_water      -0.259 -0.259 -0.339 0.259 0.259 0.377   # 99.9%
+lookout_deck_glass_with_straw    -0.259 -0.298 -0.418 0.259 0.298 0.418   # 93.2%
+lookout_deck_measuring_jug       -0.459 -0.299 -0.297 0.496 0.337 0.260   # 100.0%
+lookout_deck_perfume             -0.219 -0.179 -0.338 0.219 0.179 0.338   # 99.7%
+lookout_deck_perfume_set         -0.377 -0.337 -0.301 0.339 0.299 0.415   # 99.2%
+lookout_deck_pyramid             -0.298 -0.298 -0.104 0.298 0.298 0.294   # 99.6%
+lookout_deck_rabbit              -0.220 -0.219 -0.343 0.258 0.219 0.532   # 99.9%
+lookout_deck_snow_globe          -0.298 -0.298 -0.456 0.298 0.298 0.380   # 99.9%
+lookout_deck_snow_globe1         -0.338 -0.338 -0.221 0.338 0.338 0.297   # 99.8%
+lookout_deck_sphere              -0.259 -0.259 -0.259 0.259 0.259 0.259   # 99.9%
+lookout_deck_wine_bottle         -0.180 -0.179 -0.501 0.218 0.179 0.653   # 99.9%
+puzzle_table_bulb                -0.297 -0.298 -0.463 0.260 0.298 0.691   # 99.9%
+puzzle_table_cocktail_shaker     -0.298 -0.298 -0.540 0.298 0.298 0.654   # 99.9%
+puzzle_table_dishwashing_liquid  -0.298 -0.219 -0.500 0.298 0.219 0.614   # 99.9%
+puzzle_table_glass_of_water      -0.298 -0.298 -0.379 0.298 0.298 0.417   # 99.9%
+puzzle_table_glass_with_straw    -0.298 -0.298 -0.379 0.298 0.298 0.417   # 96.7%
+puzzle_table_measuring_jug       -0.537 -0.418 -0.416 0.537 0.418 0.340   # 99.9%
+puzzle_table_perfume             -0.219 -0.258 -0.456 0.219 0.220 0.380   # 99.4%
+puzzle_table_perfume_set         -0.340 -0.339 -0.419 0.416 0.377 0.457   # 99.1%
+puzzle_table_pyramid             -0.219 -0.220 -0.143 0.219 0.258 0.295   # 97.4%
+puzzle_table_rabbit              -0.297 -0.260 -0.381 0.260 0.297 0.495   # 99.8%
+puzzle_table_snow_globe          -0.419 -0.418 -0.693 0.457 0.418 0.580   # 99.9%
+puzzle_table_snow_globe1         -0.418 -0.418 -0.298 0.418 0.418 0.298   # 97.6%
+puzzle_table_sphere              -0.378 -0.378 -0.416 0.378 0.378 0.340   # 100.0%
+puzzle_table_wine_bottle         -0.179 -0.179 -0.459 0.179 0.179 0.535   # 99.9%
+puzzle_table_wine_bottle_set     -0.341 -0.146 -0.646 0.455 0.411 0.229   # 99.1%
+
+# Not carved: lookout_deck_wine_bottle_set's hull comes out empty, because its poses are
+# degenerate (camera distance from the scene centroid spans 3.4x, vs ~1.4x everywhere
+# else) -- the same failure the raydeform section documents. This is lookout_deck_
+# wine_bottle's box with the half-extents grown 1.35x, since a set spans wider than one
+# bottle. Re-align that capture in Metashape, then re-carve and replace this line.
+lookout_deck_wine_bottle_set     -0.250 -0.242 -0.703 0.288 0.242 0.855   # not carved

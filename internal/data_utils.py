@@ -20,12 +20,16 @@
 
 from pathlib import Path
 from typing import IO, List, Tuple, Union
+import warnings
 
 import cv2
 import numpy as np
 import torch
 from PIL import Image
 from PIL.Image import Image as PILImage
+
+# Silence noisy PNG metadata warnings from PIL/libpng (e.g. duplicate eXIf chunks)
+warnings.filterwarnings("ignore", message=r".*eXIf.*duplicate.*", category=UserWarning)
 
 
 def pil_to_numpy(im: PILImage) -> np.ndarray:
@@ -121,7 +125,9 @@ def get_depth_image_from_path(
         image = np.load(filepath) * scale_factor
         image = cv2.resize(image, (width, height), interpolation=interpolation)
     else:
-        image = cv2.imread(str(filepath.absolute()), cv2.IMREAD_ANYDEPTH)
+        # Use PIL for PNG depth reads to avoid repeated libpng duplicate eXIf warnings from cv2.
+        with Image.open(filepath) as depth_img:
+            image = np.array(depth_img)
         image = image.astype(np.float64) * scale_factor
         image = cv2.resize(image, (width, height), interpolation=interpolation)
     return torch.from_numpy(image[:, :, np.newaxis])

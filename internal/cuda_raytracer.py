@@ -6,11 +6,19 @@ import trimesh
 
 from internal.mesh_preprocess import preprocess_mesh
 
+try:
+    from tqdm import tqdm
+except ImportError:  # pragma: no cover
+    tqdm = None
+
 _ext_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'extensions', 'cuda')
 if _ext_dir not in sys.path:
     sys.path.insert(0, _ext_dir)
 
 import _cuda_backend
+
+
+_PREPROCESSED_MESH_CACHE = {}
 
 
 class CudaRayTracer:
@@ -26,14 +34,36 @@ class CudaRayTracer:
         all_faces = []
         all_geo_ids = []
         vertex_offset = 0
+        debug_progress = os.environ.get("R3F_MESH_DEBUG_PROGRESS", "0") == "1"
 
-        for mesh_idx, ply_path in enumerate(mesh_files):
-            mesh = trimesh.load_mesh(ply_path)
-            mesh = preprocess_mesh(
-                mesh,
-                convexity_threshold=convexity_threshold,
-                smooth_iterations=smooth_iterations,
+        mesh_iter = mesh_files
+        if debug_progress and tqdm is not None:
+            mesh_iter = tqdm(mesh_files, desc="Mesh preprocessing", leave=False)
+
+        for mesh_idx, ply_path in enumerate(mesh_iter):
+            if debug_progress:
+                print(f"[cuda_raytracer] ({mesh_idx + 1}/{len(mesh_files)}) preprocessing {ply_path}")
+            mesh_stat = os.stat(ply_path)
+            cache_key = (
+                os.path.abspath(ply_path),
+                int(mesh_stat.st_mtime_ns),
+                int(mesh_stat.st_size),
+                float(convexity_threshold),
+                int(smooth_iterations),
             )
+            cached = _PREPROCESSED_MESH_CACHE.get(cache_key)
+            if cached is not None:
+                mesh = cached.copy()
+            else:
+                mesh = trimesh.load_mesh(ply_path)
+                mesh = preprocess_mesh(
+                    mesh,
+                    convexity_threshold=convexity_threshold,
+                    smooth_iterations=smooth_iterations,
+                    show_progress=debug_progress,
+                    verbose=debug_progress,
+                )
+                _PREPROCESSED_MESH_CACHE[cache_key] = mesh.copy()
             verts = np.array(mesh.vertices, dtype=np.float32) * scale_factor
             faces = np.array(mesh.faces, dtype=np.uint32)
 

@@ -14,10 +14,41 @@ After loading a mesh, this module:
 import numpy as np
 import trimesh
 
+try:
+    from tqdm import tqdm
+except ImportError:  # pragma: no cover
+    tqdm = None
+
+
+def _iter_with_progress(iterable, desc: str, enable: bool):
+    if enable and tqdm is not None:
+        return tqdm(iterable, desc=desc, leave=False)
+    return iterable
+
+
+def _mean_surface_distance(target_mesh: trimesh.Trimesh,
+                           query_points: np.ndarray,
+                           chunk_size: int = 2048,
+                           show_progress: bool = False,
+                           progress_desc: str = "closest_point") -> float:
+    total = 0.0
+    count = 0
+    starts = range(0, len(query_points), chunk_size)
+    starts = _iter_with_progress(starts, desc=progress_desc, enable=show_progress)
+    for start in starts:
+        pts = query_points[start:start + chunk_size]
+        _, dists, _ = trimesh.proximity.closest_point(target_mesh, pts)
+        dists = np.abs(np.asarray(dists, dtype=np.float64))
+        total += float(np.sum(dists))
+        count += int(dists.shape[0])
+    return total / max(count, 1)
+
 
 def surface_chamfer_distance(mesh_a: trimesh.Trimesh,
                              mesh_b: trimesh.Trimesh,
-                             n_samples: int = 10000) -> float:
+                             n_samples: int = 2000,
+                             chunk_size: int = 2048,
+                             show_progress: bool = False) -> float:
     """Symmetric surface-to-surface Chamfer distance (L2, averaged).
 
     For each direction the closest point **on the surface** of the other
@@ -36,18 +67,34 @@ def surface_chamfer_distance(mesh_a: trimesh.Trimesh,
         Symmetric surface Chamfer distance (scalar, same units as mesh).
     """
     # Sample points uniformly on both surfaces
-    pts_a = mesh_a.sample(n_samples).astype(np.float64)
-    pts_b = mesh_b.sample(n_samples).astype(np.float64)
+    sample_count = max(256, int(n_samples))
+    pts_a = mesh_a.sample(sample_count).astype(np.float64)
+    pts_b = mesh_b.sample(sample_count).astype(np.float64)
 
-    # A → B surface distance
-    _, dists_a2b, _ = trimesh.proximity.closest_point(mesh_b, pts_a)
-    # B → A surface distance
-    _, dists_b2a, _ = trimesh.proximity.closest_point(mesh_a, pts_b)
+    dists_a2b = _mean_surface_distance(
+        mesh_b,
+        pts_a,
+        chunk_size=chunk_size,
+        show_progress=show_progress,
+        progress_desc="Chamfer A→B",
+    )
+    dists_b2a = _mean_surface_distance(
+        mesh_a,
+        pts_b,
+        chunk_size=chunk_size,
+        show_progress=show_progress,
+        progress_desc="Chamfer B→A",
+    )
 
-    return 0.5 * float(np.mean(np.abs(dists_a2b)) + np.mean(np.abs(dists_b2a)))
+    return 0.5 * float(dists_a2b + dists_b2a)
 
 
-def is_near_convex(mesh: trimesh.Trimesh, threshold: float = 0.02) -> tuple:
+def is_near_convex(mesh: trimesh.Trimesh,
+                   threshold: float = 0.0002,
+                   n_samples: int = 2000,
+                   chunk_size: int = 2048,
+                   show_progress: bool = False,
+                   verbose: bool = False) -> tuple:
     """Check whether *mesh* is approximately convex.
 
     Uses surface-to-surface Chamfer distance between the mesh and its
@@ -62,8 +109,18 @@ def is_near_convex(mesh: trimesh.Trimesh, threshold: float = 0.02) -> tuple:
     Returns:
         (is_convex, convex_hull, chamfer_dist)
     """
+    if verbose:
+        print("[mesh_preprocess] Stage 1/3: computing convex hull")
     convex_hull = mesh.convex_hull
-    cd = surface_chamfer_distance(mesh, convex_hull)
+    if verbose:
+        print("[mesh_preprocess] Stage 2/3: sampling + closest-point Chamfer")
+    cd = surface_chamfer_distance(
+        mesh,
+        convex_hull,
+        n_samples=n_samples,
+        chunk_size=chunk_size,
+        show_progress=show_progress,
+    )
     return cd < float(threshold), convex_hull, float(cd)
 
 
@@ -101,6 +158,9 @@ def taubin_smooth(mesh: trimesh.Trimesh,
 def preprocess_mesh(mesh: trimesh.Trimesh,
                     convexity_threshold: float = 0.02,
                     smooth_iterations: int = 10,
+                    convexity_samples: int = 2000,
+                    closest_point_chunk_size: int = 2048,
+                    show_progress: bool = False,
                     verbose: bool = True) -> trimesh.Trimesh:
     """Pre-process a mesh: replace with convex hull if near-convex, else smooth.
 
@@ -114,7 +174,19 @@ def preprocess_mesh(mesh: trimesh.Trimesh,
     Returns:
         Processed mesh (either the convex hull or smoothed original).
     """
-    is_convex, convex_hull, cd = is_near_convex(mesh, threshold=convexity_threshold)
+    try:
+        is_convex, convex_hull, cd = is_near_convex(
+            mesh,
+            threshold=convexity_threshold,
+            n_samples=convexity_samples,
+            chunk_size=closest_point_chunk_size,
+            show_progress=show_progress,
+            verbose=verbose,
+        )
+    except Exception as exc:
+        if verbose:
+            print(f"[mesh_preprocess] Convexity check failed ({exc}) -> fallback to smoothing")
+        return taubin_smooth(mesh, iterations=smooth_iterations)
 
     if verbose:
         print(f"[mesh_preprocess] Chamfer distance to convex hull: {cd:.6f} (threshold={convexity_threshold})")
@@ -126,6 +198,7 @@ def preprocess_mesh(mesh: trimesh.Trimesh,
         return convex_hull
     else:
         if verbose:
+            print("[mesh_preprocess] Stage 3/3: smoothing")
             print(f"[mesh_preprocess] Mesh is non-convex → applying Taubin smoothing "
                   f"({smooth_iterations} iterations)")
         return taubin_smooth(mesh, iterations=smooth_iterations)

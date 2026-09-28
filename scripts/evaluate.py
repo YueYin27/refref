@@ -80,6 +80,10 @@ def compute_distance_metrics(pred_dist: torch.Tensor, gt_dist: torch.Tensor, mas
     mask = mask.squeeze(-1)  # Remove channel dim if present
     mask = (mask > 0.5).float().to(device)
 
+    # if mask shape doesn't match distance maps, resize mask to match
+    if mask.shape != gt_dist.shape:
+        mask.resize_(gt_dist.shape)
+
     # Reshape tensors for masking
     pred_dist = pred_dist.unsqueeze(0).unsqueeze(0)
     gt_dist = gt_dist.unsqueeze(0).unsqueeze(0)
@@ -106,18 +110,18 @@ def load_image(path: str, mode: str = "RGB") -> torch.Tensor:
 
 def load_split_image(path: str) -> (torch.Tensor, torch.Tensor):
     img = load_image(path, mode="RGB")
-    # Split into left (GT) and right (pred)
-    gt_rgb = img[:, :800, :]
-    pred_rgb = img[:, 800:, :]
+    # Split into left (GT) and right (pred) at the middle column (img_size[1] // 2)
+    gt_rgb = img[:, :img.shape[1] // 2, :]
+    pred_rgb = img[:, img.shape[1] // 2:, :]
     return gt_rgb, pred_rgb
 
 
 def load_split_distance_image(path: str) -> (torch.Tensor, torch.Tensor):
     """Load a combined distance map image (same layout as RGB: left=GT, right=pred) and split it."""
     img = load_image(path, mode="L")
-    # Split into left (GT) and right (pred), same 800-pixel split as load_split_image
-    gt_dist = img[:, :800, :]
-    pred_dist = img[:, 800:, :]
+    # Split into left (GT) and right (pred), same middle split as load_split_image
+    gt_dist = img[:, :img.shape[1] // 2, :]
+    pred_dist = img[:, img.shape[1] // 2:, :]
     return gt_dist, pred_dist
 
 
@@ -136,7 +140,7 @@ if __name__ == "__main__":
         # Generate filenames
         rgb_path = os.path.join(args.result_dir, "rgb_images", f"r_{idx}.png")
         mask_path = os.path.join(args.mask_dir, f"r_{idx}_mask_0000.png")
-        dist_path = os.path.join(args.result_dir, "distance_maps", f"r_{idx}_dist.png")
+        dist_path = os.path.join(args.result_dir, "distance_maps", f"r_{idx}_depth.png")
 
         # Load data
         try:
@@ -157,6 +161,8 @@ if __name__ == "__main__":
 
         try:
             gt_dist, pred_dist = load_split_distance_image(dist_path)
+            # print("shape of gt_dist:", gt_dist.shape)
+            # print("shape of pred_dist:", pred_dist.shape)
             dist_metrics = compute_distance_metrics(pred_dist, gt_dist, mask)
         except FileNotFoundError as e:
             print(f"Distance map file not found: {e}, skipping distance metrics for index {idx}")
@@ -166,6 +172,9 @@ if __name__ == "__main__":
         if 'dist_rmse' in dist_metrics and not np.isnan(dist_metrics['dist_rmse']):
             assert pred_dist.shape == gt_dist.shape, f"Distance map shape mismatch in {dist_path}"
         if mask is not None:
+            # if mask shape doesn't match RGB shape, resize mask to match RGB shape
+            if mask.shape[:2] != gt_rgb.shape[:2]:
+                mask.resize_(gt_rgb.shape[0], gt_rgb.shape[1], 1)
             assert mask.shape[:2] == gt_rgb.shape[:2], f"Mask shape mismatch: {mask_path}"
 
         # Compute RGB metrics

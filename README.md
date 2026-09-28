@@ -21,14 +21,20 @@
   </a>
 </p>
 
+https://github.com/user-attachments/assets/b8bf6a77-9750-4073-91dd-75e47604cf78
+
+<p align="center">
+  <em>Synthetic scenes (rows 1–3: environment-map, cube and sphere backgrounds) and real scenes (rows 4–5: indoor and outdoor).</em>
+</p>
+
 <br>
 
 ## ✨ Overview
-This repository provides both a synthetic dataset and a novel method for reconstructing scenes with refractive and reflective objects from posed images:
+This repository provides the RefRef dataset and benchmark for reconstructing refractive and reflective objects from posed images.
 
-- **RefRef Dataset**: 150 high-quality synthetic scenes containing reflective and refractive objects;  
-- **Oracle Method**: a method that models light paths using ground-truth object geometry and refractive indices;
-- **R3F (Refractive–Reflective Radiance Field)**: a method that relaxes these requirements by estimating and smoothing the object geometry.  
+- **RefRef Dataset**: 150 synthetic scenes and 60 real scenes spanning diverse geometries, materials, and backgrounds.
+- **Oracle Method**: models light paths using ground-truth object geometry and refractive indices.
+- **R3F (Refractive–Reflective Radiance Field)**: a simple two-stage baseline that uses NU-NeRF reconstructions for ray tracing, trains a background radiance field, and then trains an in-object field with the background frozen.
 
 <br>
 
@@ -65,15 +71,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
       pip install -e .
       ```
 
-3. **Install [sdfstudio](https://github.com/autonomousvision/sdfstudio):**
-    ```bash
-    git clone https://github.com/autonomousvision/sdfstudio.git
-    cd sdfstudio
-    pip install --upgrade pip setuptools
-    pip install -e .
-    ```
-
-4. **Clone this repository and install dependencies:**
+3. **Clone this repository and install dependencies:**
       ```bash
       git clone https://github.com/YueYin27/refref.git
       cd refref
@@ -85,7 +83,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
       ns-install-cli
       ```
 
-5. **Verify the installation by running the help command for our training script:**
+4. **Verify the installation by running the help command for our training script:**
       ```bash
       ns-train r3f --help
       ns-train r3f refref-data --help
@@ -99,7 +97,28 @@ This repository provides both a synthetic dataset and a novel method for reconst
 
 ### 🔄 Optimize a Scene
 
-1. **Stage-1: Estimate and smooth the object geometry**
+1. **Stage 1: Obtain object geometry from NU-NeRF**
+
+   Follow the setup, reconstruction, and mesh-extraction instructions in the official [NU-NeRF repository](https://github.com/78ij/NU-NeRF) to obtain meshes for your scene.
+   Use the exported simplified `.ply` mesh and pass its path through `--ply-path` in Stage 2 below.
+
+   <details>
+   <summary>Previous version of stage 1: UNISURF / visual-hull geometry estimation</summary>
+
+   These instructions describe the previous version of R3F. The current version uses NU-NeRF reconstructions.
+
+   **SDFStudio setup (previous version only)**
+
+   Install SDFStudio to run the UNISURF instructions below. It is not required for the current NU-NeRF mesh workflow.
+
+   ```bash
+   git clone https://github.com/autonomousvision/sdfstudio.git
+   cd sdfstudio
+   pip install --upgrade pip setuptools
+   pip install -e .
+   cd ..
+   ```
+
    - <details>
      <summary>Download masks from the <a href="https://huggingface.co/datasets/yinyue27/RefRef_additional">RefRef_additional</a> repository</summary>
      e.g. download the cube masks:
@@ -151,6 +170,8 @@ This repository provides both a synthetic dataset and a novel method for reconst
      </details>
 
    - Smooth the mesh file following the instructions [here](https://arxiv.org/pdf/2505.05848).
+
+   </details>
 
 2. **Stage 2: Optimize a Scene**
     - **Run R3F:**
@@ -211,7 +232,7 @@ This repository provides both a synthetic dataset and a novel method for reconst
 ## 📑 Citation  
    ```bibtex
    @misc{yin2025refrefsyntheticdatasetbenchmark,
-         title={RefRef: A Synthetic Dataset and Benchmark for Reconstructing Refractive and Reflective Objects}, 
+         title={RefRef: A Dataset and Benchmark for Reconstructing Refractive and Reflective Objects}, 
          author={Yue Yin and Enze Tao and Weijian Deng and Dylan Campbell},
          year={2025},
          eprint={2505.05848},

@@ -10,15 +10,9 @@
 <br>
 
 <p align="center">
-  <a href="https://arxiv.org/abs/2505.05848">
-    <img src="https://img.shields.io/badge/Paper-arXiv-red?logo=arxiv&logoColor=white" style="height: 27px; margin: 5px;">
-  </a>&nbsp
-  <a href="https://huggingface.co/datasets/yinyue27/RefRef">
-    <img src="https://img.shields.io/badge/Dataset-HuggingFace-yellow?logo=huggingface&logoColor=white" style="height: 27px; margin: 5px;">
-  </a>&nbsp
-  <a href="https://yueyin27.github.io/refref-page">
-  <img src="https://img.shields.io/badge/Project-Website-blue?logo=google-chrome&logoColor=white" style="height: 27px; margin: 5px;">
-  </a>
+  <a href="https://arxiv.org/abs/2505.05848"><img src="https://img.shields.io/badge/Paper-arXiv-red?logo=arxiv&logoColor=white" style="height: 27px; margin: 5px;"></a>&nbsp;&nbsp;
+  <a href="https://huggingface.co/datasets/yinyue27/RefRef"><img src="https://img.shields.io/badge/Dataset-HuggingFace-yellow?logo=huggingface&logoColor=white" style="height: 27px; margin: 5px;"></a>&nbsp;&nbsp;
+  <a href="https://yueyin27.github.io/refref-page"><img src="https://img.shields.io/badge/Project-Website-blue?logo=google-chrome&logoColor=white" style="height: 27px; margin: 5px;"></a>
 </p>
 
 https://github.com/user-attachments/assets/b8bf6a77-9750-4073-91dd-75e47604cf78

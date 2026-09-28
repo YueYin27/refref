@@ -24,6 +24,7 @@ import imageio
 import numpy as np
 import torch
 
+from nerfstudio.cameras import camera_utils
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.data.dataparsers.base_dataparser import DataParser, DataParserConfig, DataparserOutputs
 from nerfstudio.data.scene_box import SceneBox
@@ -47,6 +48,14 @@ class BlenderDataParserConfig(DataParserConfig):
     ply_path: Optional[Path] = None
     """Path to PLY file to load 3D points from, defined relative to the dataset directory. This is helpful for
     Gaussian splatting and generally unused otherwise. If `None`, points are initialized randomly."""
+    split_override: Optional[str] = None
+    """If set, every split loads transforms_{split_override}.json instead of its own. Use "vis" to render the
+    fly-through trajectory the synthetic scenes ship, which is not one of the train/val/test splits."""
+    use_distortion: bool = True
+    """Whether to pass the OPENCV distortion coefficients (k1..k4, p1, p2) in transforms.json to the cameras, so
+    nerfstudio undistorts rays as it does for the other baselines. The real captures carry real distortion
+    (k1~0.23, k2~-0.65, k3~0.49: ~10px at the image corner, ~1px over the object). Set False to reproduce the
+    pinhole model NU-NeRF used when it extracted the meshes, if the traced mesh silhouette looks offset."""
 
 
 @dataclass
@@ -69,30 +78,94 @@ class Blender(DataParser):
         self.scale_factor = config.scale_factor
         self.ply_path = config.ply_path
 
+    def _find_mask(self, image_path: Path) -> Optional[Path]:
+        """Locate the segmentation mask for an image that transforms.json does not name.
+
+        The synthetic scenes carry a "mask_file_path" per frame, but the real captures were
+        segmented (utils/sam3_infer.py) after their JSON was written, and keep the masks in
+        masks/ under the image's own name. The bg stage cannot run without them -- it is
+        defined by dropping the object from the loss -- so look them up by name.
+        """
+        mask_dir = self.data / "masks"
+        if not mask_dir.is_dir():
+            return None
+        for suffix in (image_path.suffix, ".png", ".jpg", ".jpeg"):
+            candidate = mask_dir / (image_path.stem + suffix)
+            if candidate.is_file():
+                return candidate
+        return None
+
     def _generate_dataparser_outputs(self, split="train"):
+        if self.config.split_override is not None:
+            split = self.config.split_override
         meta = load_from_json(self.data / f"transforms_{split}.json")
         image_filenames = []
         mask_filenames = []
         depth_filenames = []
         poses = []
+        # Intrinsics are per frame, not per scene: the synthetic scenes share one
+        # camera_angle_x, while the real captures put fl_x/fl_y/cx/cy (and the distortion
+        # coefficients) at the top level, and nerfstudio's own format allows either. Read
+        # each frame with the top-level entry as its fallback rather than assuming one lens.
+        fx, fy, cx, cy, heights, widths, distortion_params = [], [], [], [], [], [], []
+
+        def _intrinsic(frame, key, default=None):
+            value = frame.get(key, meta.get(key, default))
+            return None if value is None else float(value)
+
         for frame in meta["frames"]:
-            fname = self.data / Path(frame["file_path"].replace("./", "") + ".png")
-            mask_fname = self.data / Path(frame["mask_file_path"].replace("./", ""))
-            depth_fname = self.data / Path(frame["depth_file_path"].replace("./", ""))
-            depth_filenames.append(depth_fname)
-            mask_filenames.append(mask_fname)
+            # Blender exports leave the extension off ("./train/r_0"); the real captures
+            # keep it ("images/frame_00001.jpg").
+            rel_path = Path(frame["file_path"].replace("./", ""))
+            fname = self.data / (rel_path if rel_path.suffix else rel_path.with_suffix(".png"))
             image_filenames.append(fname)
+            if "mask_file_path" in frame:
+                mask_filenames.append(self.data / Path(frame["mask_file_path"].replace("./", "")))
+            else:
+                mask_fname = self._find_mask(fname)
+                if mask_fname is not None:
+                    mask_filenames.append(mask_fname)
+            if "depth_file_path" in frame:
+                depth_filenames.append(self.data / Path(frame["depth_file_path"].replace("./", "")))
             poses.append(np.array(frame["transform_matrix"]))
         poses = np.array(poses).astype(np.float32)
         img_0 = imageio.v2.imread(image_filenames[0])
         image_height, image_width = img_0.shape[:2]
-        camera_angle_x = float(meta["camera_angle_x"])
-        focal_length = 0.5 * image_width / np.tan(0.5 * camera_angle_x)
-        # focal_length_x = float(meta["fl_x"])
-        # focal_length_y = float(meta["fl_y"])
 
-        cx = image_width / 2.0
-        cy = image_height / 2.0
+        for frame in meta["frames"]:
+            width = int(_intrinsic(frame, "w", image_width))
+            height = int(_intrinsic(frame, "h", image_height))
+            focal_length_x = _intrinsic(frame, "fl_x")
+            if focal_length_x is None:
+                # Blender export: one horizontal FOV, square pixels, principal point centred.
+                camera_angle_x = float(_intrinsic(frame, "camera_angle_x"))
+                focal_length_x = 0.5 * width / np.tan(0.5 * camera_angle_x)
+                focal_length_y = focal_length_x
+            else:
+                focal_length_y = _intrinsic(frame, "fl_y", focal_length_x)
+            widths.append(width)
+            heights.append(height)
+            fx.append(focal_length_x)
+            fy.append(focal_length_y)
+            cx.append(_intrinsic(frame, "cx", width / 2.0))
+            cy.append(_intrinsic(frame, "cy", height / 2.0))
+            distortion_params.append(
+                camera_utils.get_distortion_params(
+                    k1=_intrinsic(frame, "k1", 0.0),
+                    k2=_intrinsic(frame, "k2", 0.0),
+                    k3=_intrinsic(frame, "k3", 0.0),
+                    k4=_intrinsic(frame, "k4", 0.0),
+                    p1=_intrinsic(frame, "p1", 0.0),
+                    p2=_intrinsic(frame, "p2", 0.0),
+                )
+            )
+
+        distortion = torch.stack(distortion_params)
+        # An all-zero stack is what the synthetic scenes produce; leave it as None there so
+        # nerfstudio skips the undistortion path entirely rather than running it as a no-op.
+        if not self.config.use_distortion or not torch.any(distortion):
+            distortion = None
+
         camera_to_world = torch.from_numpy(poses[:, :3])  # camera to world transform
 
         # in x,y,z order
@@ -101,22 +174,25 @@ class Blender(DataParser):
 
         cameras = Cameras(
             camera_to_worlds=camera_to_world,
-            fx=focal_length,
-            fy=focal_length,
-            cx=cx,
-            cy=cy,
+            fx=torch.tensor(fx, dtype=torch.float32),
+            fy=torch.tensor(fy, dtype=torch.float32),
+            cx=torch.tensor(cx, dtype=torch.float32),
+            cy=torch.tensor(cy, dtype=torch.float32),
+            height=torch.tensor(heights, dtype=torch.int32),
+            width=torch.tensor(widths, dtype=torch.int32),
+            distortion_params=distortion,
             camera_type=CameraType.PERSPECTIVE,
         )
 
         metadata={
-                "depth_filenames": depth_filenames if len(depth_filenames) > 0 else None
+                "depth_filenames": depth_filenames if len(depth_filenames) == len(image_filenames) else None
             }
         if self.config.ply_path is not None:
             metadata.update(self._load_3D_points(self.config.data / self.config.ply_path))
 
         dataparser_outputs = DataparserOutputs(
             image_filenames=image_filenames,
-            mask_filenames=mask_filenames,
+            mask_filenames=mask_filenames if len(mask_filenames) == len(image_filenames) else None,
             cameras=cameras,
             alpha_color=self.alpha_color_tensor,
             scene_box=scene_box,

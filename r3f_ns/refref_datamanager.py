@@ -52,6 +52,10 @@ class RefRefDataManagerConfig(VanillaDataManagerConfig):
     _target: Type = field(default_factory=lambda: RefRefDataManager)
     stage: Literal["bg", "fg", "none"] = "none"
     """Training stage: 'bg' trains background only, 'fg' reserved for future use."""
+    train_num_workers: int = 2
+    """Number of dataloader workers per device for training."""
+    eval_num_workers: int = 2
+    """Number of dataloader workers per device for evaluation."""
 
 
 class RefRefDataManager(VanillaDataManager[RefRefDataset]):
@@ -146,7 +150,7 @@ class RefRefDataManager(VanillaDataManager[RefRefDataset]):
             num_images_to_sample_from=self.config.train_num_images_to_sample_from,
             num_times_to_repeat_images=self.config.train_num_times_to_repeat_images,
             device=self.device,
-            num_workers=self.world_size * 4,
+            num_workers=self.world_size * self.config.train_num_workers,
             pin_memory=True,
             collate_fn=self.config.collate_fn,
             exclude_batch_keys_from_device=self.exclude_batch_keys_from_device,
@@ -172,7 +176,7 @@ class RefRefDataManager(VanillaDataManager[RefRefDataset]):
             num_images_to_sample_from=self.config.eval_num_images_to_sample_from,
             num_times_to_repeat_images=self.config.eval_num_times_to_repeat_images,
             device=self.device,
-            num_workers=self.world_size * 4,
+            num_workers=self.world_size * self.config.eval_num_workers,
             pin_memory=True,
             collate_fn=self.config.collate_fn,
             exclude_batch_keys_from_device=self.exclude_batch_keys_from_device,
@@ -184,12 +188,12 @@ class RefRefDataManager(VanillaDataManager[RefRefDataset]):
         self.fixed_indices_eval_dataloader = FixedIndicesEvalDataloader(
             input_dataset=self.eval_dataset,
             device=self.device,
-            num_workers=self.world_size * 4,
+            num_workers=self.world_size * self.config.eval_num_workers,
         )
         self.eval_dataloader = RandIndicesEvalDataloader(
             input_dataset=self.eval_dataset,
             device=self.device,
-            num_workers=self.world_size * 4,
+            num_workers=self.world_size * self.config.eval_num_workers,
         )
         # # Initialize your custom dataset (HFDataset) for evaluation
         # eval_dataparser_outputs = self._get_eval_dataparser_outputs()  # Adjust this based on your logic

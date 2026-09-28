@@ -157,9 +157,16 @@ class RefRefDataset(InputDataset):
                 assert (
                     data["mask"].shape[:2] == data["image"].shape[:2]
                 ), f"Mask and image have different shapes. Got {data['mask'].shape[:2]} and {data['image'].shape[:2]}"
-            if self._dataparser_outputs.metadata is not None:
+            if self._dataparser_outputs.metadata is not None and self._dataparser_outputs.metadata.get("depth_filenames") is not None:
                 depth_filepath = self._dataparser_outputs.metadata["depth_filenames"][image_idx]
-                data["depth"] = get_depth_image_from_path(filepath=depth_filepath, height=800, width=800, scale_factor=self.scale_factor)
+                # Keep depth resolution aligned with sampled image resolution so pixel samplers can index safely.
+                image_height, image_width = data["image"].shape[:2]
+                data["depth"] = get_depth_image_from_path(
+                    filepath=depth_filepath,
+                    height=image_height,
+                    width=image_width,
+                    scale_factor=self.scale_factor,
+                )
             if self.mask_color:
                 data["image"] = torch.where(
                     data["mask"] == 1.0, data["image"], torch.ones_like(data["image"]) * torch.tensor(self.mask_color)

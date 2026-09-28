@@ -49,6 +49,58 @@ from internal.models import Model as r3f
 from internal.ray_reflection import RayReflection
 
 
+# Refractive index of the medium each mesh encloses.
+IOR_MAP = {"glass": 1.5, "water": 1.333, "diamond": 2.418, "air": 1.0, "alcohol": 1.36, "plastic": 1.45, "perfume": 1.46}
+
+# The synthetic meshes name their material (ball_glass.ply, beaker_water.ply), so the
+# material is read straight off the filename. The real captures cannot: their meshes come
+# from NU-NeRF as <background>_<object>-<step>_simplified.ply, which names the object and
+# nothing else. Map each object to what it actually holds -- and note this is not something
+# the object's own name can be trusted for, since "glass_of_water" and "glass_with_straw"
+# are water in a glass, not solid glass.
+REAL_CAPTURE_MATERIALS = {
+    "sphere": "glass",
+    "rabbit": "glass",
+    "pyramid": "glass",
+    "perfume": "perfume",
+    "perfume_set": "perfume",
+    "wine_bottle": "alcohol",
+    "wine_bottle_set": "alcohol",
+    "bulb": "water",
+    "cocktail_shaker": "water",
+    "dishwashing_liquid": "water",
+    "glass_of_water": "water",
+    "glass_with_straw": "water",
+    "measuring_jug": "water",
+    "snow_globe": "water",
+    "snow_globe1": "water",
+}
+
+
+def material_from_mesh_path(path: str) -> str:
+    """Work out which material a mesh encloses from its filename.
+
+    Real captures are matched first: their object name has to win over any material word
+    that happens to appear in the path, or living_room_glass_of_water would come out as
+    glass. Synthetic meshes then fall back to the material word in the name.
+    """
+    stem = os.path.basename(path).split('-')[0]  # drops "-200000_simplified.ply"
+    matches = [obj for obj in REAL_CAPTURE_MATERIALS if stem == obj or stem.endswith('_' + obj)]
+    if matches:
+        return REAL_CAPTURE_MATERIALS[max(matches, key=len)]
+
+    words = os.path.basename(path).replace('.ply', '').split('_')
+    material = next((word for word in words if word in IOR_MAP), words[-1])
+    if material not in IOR_MAP:
+        raise ValueError(
+            f"Cannot tell what material {os.path.basename(path)} is: its name holds none of "
+            f"{sorted(IOR_MAP)}, and it is not one of the real-capture objects "
+            f"({sorted(REAL_CAPTURE_MATERIALS)}). Add it to REAL_CAPTURE_MATERIALS in "
+            f"r3f_ns/r3f_model.py, or rename the mesh to end in _<material>.ply."
+        )
+    return material
+
+
 @dataclass
 class R3FModelConfig(ModelConfig):
     gin_file: list = None
@@ -99,15 +151,15 @@ class R3FModel(Model):
         config.max_refracted_bounces = self.config.max_refracted_bounces
 
         # load mesh files and build GPU BVH ray tracer
-        ior_map = {"glass": 1.5, "water": 1.333, "diamond": 2.418, "air": 1.0, "alcohol": 1.36, "plastic": 1.45, "perfume": 1.46}
         mesh_files = str(self.kwargs['ply_path']).split()
         self.scene = None
         if mesh_files and self.config.stage != "bg":
-            material_list = [
-                next((word for word in path.split('_') if word in ior_map), path.split('_')[-1].replace('.ply', ''))
-                for path in mesh_files
-            ]
-            iors = [ior_map[material] for material in material_list]
+            material_list = [material_from_mesh_path(path) for path in mesh_files]
+            CONSOLE.print(
+                "Mesh materials: "
+                + ", ".join(f"{os.path.basename(p)} -> {m} (ior {IOR_MAP[m]})" for p, m in zip(mesh_files, material_list))
+            )
+            iors = [IOR_MAP[material] for material in material_list]
             iors.append(float('nan'))
             iors = torch.tensor(iors, dtype=torch.float32)
             from internal.cuda_raytracer import CudaRayTracer
@@ -132,10 +184,11 @@ class R3FModel(Model):
             self.r3f_bg.load_state_dict(bg_state)
             self.r3f_bg.opaque_background = self.config.bg_opaque_background
             self.r3f_bg.eval()
+            # Freeze BG model parameters since it's only used for querying, not optimized in the fg stage.
             for p in self.r3f_bg.parameters():
                 p.requires_grad_(False)
             # Store the BG model's far plane for querying; fall back to FG far if not specified.
-            self.bg_far = self.config.bg_far if self.config.bg_far is not None else config.far
+            self.bg_far = self.config.bg_far if self.config.bg_far is not None else 15.0
             if self.config.bg_far is not None:
                 print(
                     f"Loaded frozen BG field from {self.config.bg_checkpoint_path} "
@@ -210,7 +263,7 @@ class R3FModel(Model):
         R = ((Rs + Rp) / 2).unsqueeze(-1)
         return torch.nan_to_num(R, nan=0.0)
 
-    def _query_bg_field(self, origins, directions, radii, cam_idx, near, far):
+    def _query_bg_field(self, origins, directions, radii, cam_idx, near, far, return_depth: bool = False):
         """Query the frozen background field for a set of rays.
         Always uses train_frac=1.0 since the bg field is fully trained.
         Overrides far with self.bg_far so the ray warp matches BG training."""
@@ -240,7 +293,13 @@ class R3FModel(Model):
             straight=True,
             scene=None,
         )
-        return renderings_bg[-1]['rgb']
+        bg_rgb = renderings_bg[-1]['rgb']
+        if not return_depth:
+            return bg_rgb
+        bg_depth = renderings_bg[-1].get('depth', None)
+        if bg_depth is None:
+            bg_depth = torch.zeros(origins.shape[0], device=origins.device, dtype=bg_rgb.dtype)
+        return bg_rgb, bg_depth
 
     def _render_fg_stage(self, batch, anneal_frac):
         """Full rendering pipeline for fg stage: fg field (interior) + frozen bg field (exit/reflected).
@@ -279,12 +338,22 @@ class R3FModel(Model):
 
         # ── Step 2: Query frozen BG field for non-hitting camera rays ──
         final_rgb = torch.zeros(N, 3, device=device)
+        bg_depth_cam = torch.zeros(N, device=device, dtype=cam_dirs.dtype)
+        with torch.no_grad():
+            bg_rgb_cam, bg_depth_cam = self._query_bg_field(
+                cam_origins,
+                cam_dirs,
+                batch['radii'],
+                batch['cam_idx'],
+                batch['near'],
+                batch['far'],
+                return_depth=True,
+            )
+            bg_rgb_cam = torch.nan_to_num(bg_rgb_cam, nan=1.0, posinf=1.0, neginf=0.0)
+            bg_depth_cam = torch.nan_to_num(bg_depth_cam, nan=0.0, posinf=0.0, neginf=0.0)
         with torch.no_grad():
             if n_hit < N:
-                nonhit_rgb = self._query_bg_field(
-                    cam_origins[~hit_mask], cam_dirs[~hit_mask],
-                    batch['radii'][~hit_mask], batch['cam_idx'][~hit_mask],
-                    batch['near'][~hit_mask], batch['far'][~hit_mask])
+                nonhit_rgb = bg_rgb_cam[~hit_mask]
                 final_rgb[~hit_mask] = torch.clip(image.linear_to_srgb(nonhit_rgb), 0.0, 1.0)
 
         # ── Step 3: For hitting rays, trace exit geometry and query bg field ──
@@ -445,7 +514,7 @@ class R3FModel(Model):
             renderings = [{'rgb': final_rgb, 'depth': torch.zeros(N, device=device),
                            'acc': torch.zeros(N, device=device)}]
 
-        return renderings, ray_history, rfls, ray_results, ray_samples, hit_mask
+        return renderings, ray_history, rfls, ray_results, ray_samples, hit_mask, bg_depth_cam, t_entry
 
     def get_outputs(self, ray_bundle: RayBundle):
         ray_bundle.metadata["viewdirs"] = ray_bundle.directions
@@ -473,7 +542,7 @@ class R3FModel(Model):
             renderings[-1]['rgb'] = torch.clip(image.linear_to_srgb(renderings[-1]['rgb']), 0.0, 1.0)
 
         elif self.config.stage == "fg":
-            renderings, ray_history, rfls, ray_results, ray_samples, hit_mask = \
+            renderings, ray_history, rfls, ray_results, ray_samples, hit_mask, bg_depth, t_entry = \
                 self._render_fg_stage(batch, anneal_frac)
 
         else:
@@ -510,6 +579,9 @@ class R3FModel(Model):
         outputs['rgb']=renderings[-1]['rgb']
         depth = renderings[-1]['depth']
         outputs['depth']=depth.unsqueeze(-1) if depth.ndim == 1 else depth
+        if self.config.stage == "fg":
+            outputs['bg_depth'] = bg_depth.unsqueeze(-1) if bg_depth.ndim == 1 else bg_depth
+            outputs['fg_surface_depth'] = t_entry.unsqueeze(-1) if t_entry.ndim == 1 else t_entry
         outputs['accumulation']=renderings[-1]['acc']
         if self.config.compute_extras:
             outputs['distance_mean']=renderings[-1].get('distance_mean', depth)
@@ -623,19 +695,19 @@ class R3FModel(Model):
             mask = batch["mask"].to(self.device).float()
             mask = mask.permute(2, 0, 1).unsqueeze(0)  # Reshape to [1, 1, H, W] to match the image dimensions
 
-            # Ensure mask is not empty (i.e., contains at least one 1)
+            # A SAM3 mask can come back empty -- the segmenter finds nothing in that frame --
+            # and masked PSNR is undefined over zero pixels. Leave the key out rather than
+            # report a number computed from no data. Setting it unconditionally raised
+            # UnboundLocalError here and killed the whole run at the first such eval frame.
             if mask.sum() > 0:
                 # Compute masked PSNR for the current image
                 mask = mask.expand_as(gt_rgb)
                 masked_gt_rgb = gt_rgb[mask == 1]
                 masked_predicted_rgb = predicted_rgb[mask == 1]
                 mse = torch.mean((masked_gt_rgb - masked_predicted_rgb) ** 2)
-                masked_psnr = 10 * torch.log10((1 ** 2) / mse)
+                metrics_dict["masked_psnr"] = float(10 * torch.log10((1 ** 2) / mse))
             else:
-                print("Mask is empty, skipping PSNR computation for this image.")
-
-            # Compute the average masked PSNR for the batch and store it in the metrics dictionary
-            metrics_dict["masked_psnr"] = float(masked_psnr)
+                print(f"Mask for eval image {batch.get('image_idx', '?')} is empty; skipping masked_psnr.")
 
         images_dict = {"img": combined_rgb, "accumulation": combined_acc, "depth": combined_depth}
 

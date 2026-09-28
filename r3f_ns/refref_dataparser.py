@@ -28,6 +28,7 @@ from typing import Optional, Type, Literal
 import imageio
 import numpy as np
 import torch
+from PIL import PngImagePlugin
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.data.dataparsers.base_dataparser import DataParser, DataParserConfig, DataparserOutputs
 from nerfstudio.data.scene_box import SceneBox
@@ -69,6 +70,11 @@ class RefRefDataParser(DataParser):
 
     config: RefRefDataParserConfig
     local_data_dir: Path = Path("data/RefRef_dataset_cache")
+
+    @staticmethod
+    def _save_png_without_metadata(pil_image, path: Path) -> None:
+        pnginfo = PngImagePlugin.PngInfo()
+        pil_image.save(path, pnginfo=pnginfo)
 
     def __init__(self, config: RefRefDataParserConfig):
         super().__init__(config=config)
@@ -135,11 +141,11 @@ class RefRefDataParser(DataParser):
             mask_path = split_dir / f"mask_{idx:04d}.png"
 
             if not img_path.exists():
-                frame["image"].save(img_path)
+                self._save_png_without_metadata(frame["image"], img_path)
             if not depth_path.exists():
-                frame["depth"].save(depth_path)
+                self._save_png_without_metadata(frame["depth"], depth_path)
             if not mask_path.exists():
-                frame["mask"].save(mask_path)
+                self._save_png_without_metadata(frame["mask"], mask_path)
 
             self.image_paths.append(img_path)
             self.depth_paths.append(depth_path)

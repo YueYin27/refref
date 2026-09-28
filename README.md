@@ -23,18 +23,14 @@
 
 https://github.com/user-attachments/assets/b8bf6a77-9750-4073-91dd-75e47604cf78
 
-<p align="center">
-  <em>Synthetic scenes (rows 1–3: environment-map, cube and sphere backgrounds) and real scenes (rows 4–5: indoor and outdoor).</em>
-</p>
-
 <br>
 
 ## ✨ Overview
 This repository provides the RefRef dataset and benchmark for reconstructing refractive and reflective objects from posed images.
 
-- **RefRef Dataset**: 150 synthetic scenes and 60 real scenes spanning diverse geometries, materials, and backgrounds.
+- **RefRef Dataset**: 150 synthetic and 60 real scenes spanning diverse geometries, materials, and backgrounds.
 - **Oracle Method**: models light paths using ground-truth object geometry and refractive indices.
-- **R3F (Refractive–Reflective Radiance Field)**: a simple two-stage baseline that uses NU-NeRF reconstructions for ray tracing, trains a background radiance field, and then trains an in-object field with the background frozen.
+- **R3F (Refractive–Reflective Radiance Field)**: a simple two-stage baseline that uses NU-NeRF reconstructions for ray tracing, trains a background NeRF, and then trains an in-object field with the background frozen.
 
 <br>
 

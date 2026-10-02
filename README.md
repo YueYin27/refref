@@ -87,13 +87,15 @@ This repository provides the RefRef dataset and benchmark for reconstructing ref
 
 ### 🔄 Optimize a Scene
 
-1. **Stage 1: Obtain object geometry from NU-NeRF**
+R3F trains in two stages: a background field first (Stage 1), then an in-object field ray-traced through the object mesh with that background frozen (Stage 2). Stage 2 needs a mesh of the object, so obtain one first.
+
+0. **Prerequisite: Obtain object geometry from NU-NeRF**
 
    Follow the setup, reconstruction, and mesh-extraction instructions in the official [NU-NeRF repository](https://github.com/78ij/NU-NeRF) to obtain meshes for your scene.
-   Use the exported simplified `.ply` mesh and pass its path through `--ply-path` in Stage 2 below.
+   Use the exported simplified `.ply` mesh and pass its path through `--ply-path` in Stage 2 below. Stage 1 does not use the mesh, so it can run while NU-NeRF is still reconstructing.
 
    <details>
-   <summary>Previous version of stage 1: UNISURF / visual-hull geometry estimation</summary>
+   <summary>Previous version of the geometry step: UNISURF / visual-hull geometry estimation</summary>
 
    These instructions describe the previous version of R3F. The current version uses NU-NeRF reconstructions.
 
@@ -163,42 +165,82 @@ This repository provides the RefRef dataset and benchmark for reconstructing ref
 
    </details>
 
-2. **Stage 2: Optimize a Scene**
-    - **Run R3F:**
+1. **Stage 1: Train the background field (BG)**
+
+   Train R3F on the background only: the object mask removes the object's pixels from the loss. Masks come with the RefRef dataset, so this step needs no mesh.
+   ```bash
+   # Use configs/refref.gin (far=15) for textured cube/sphere scenes ("cube_*", "sphere_*"),
+   # and configs/refref_hdr.gin (far=1000) for environment-map scenes ("env_*").
+   ns-train r3f --pipeline.stage bg \
+                --machine.device-type cuda \
+                --machine.num-devices 1 \
+                --project-name r3f \
+                --experiment-name "r3f_cube_smcvx_cube_bg" \
+                --pipeline.model.gin-file "configs/refref.gin" \
+                --pipeline.model.background-color random \
+                --max-num-iterations 10000 \
+                --output-dir "outputs/bg" \
+                --vis wandb \
+            refref-data \
+                --scene-name "cube_smcvx_cube" \
+                --scale-factor 0.1
+   ```
+
+2. **Stage 2: Train the in-object field (FG) with the background frozen**
+
+   Load the Stage 1 checkpoint as a frozen background and train the field inside the object, ray-traced through the mesh.
+   - `--pipeline.bg-checkpoint-path` must point to a `.ckpt` file, not to the run directory.
+   - `--pipeline.bg-far` must match the `far` of the gin file used in Stage 1: `15` for `refref.gin`, `1000` for `refref_hdr.gin`.
+
+   - **Run R3F:**
       ```bash
+      # Path to the Stage 1 (BG) checkpoint file
+      bg_ckpt=$(ls outputs/bg/r3f_cube_smcvx_cube_bg/r3f/*/nerfstudio_models/step-*.ckpt | sort | tail -n 1)
       # Path to your estimated mesh file with material name in the file name
       # If multiple meshes, split them with space
       ply_file="./mesh_files/.../cube_glass_est.ply"
       
-      ns-train r3f --machine.device-type cuda \
+      ns-train r3f --pipeline.stage fg \
+                   --pipeline.bg-checkpoint-path "$bg_ckpt" \
+                   --pipeline.bg-far 15 \
+                   --pipeline.bg-opaque-background True \
+                   --machine.device-type cuda \
                    --machine.num-devices 1 \
                    --project-name r3f \
-                   --pipeline.model.gin-file "configs/refref.gin" \
+                   --experiment-name "r3f_cube_smcvx_cube_fg" \
+                   --pipeline.model.gin-file "configs/refref_fg.gin" \
                    --pipeline.model.background-color random \
-                   --max-num-iterations 25000 \
-                   --output-dir "outputs" \
+                   --max-num-iterations 10000 \
+                   --output-dir "outputs/fg" \
                    --vis wandb \
                refref-data \
                    --scene-name "cube_smcvx_cube" \
                    --scale-factor 0.1 \
                    --ply-path $ply_file
       ```
-    - **Run Oracle:**
+   - **Run Oracle:** same as R3F, but with the ground-truth mesh. The Stage 1 checkpoint can be reused, since the BG stage does not use a mesh.
       ```bash
       # Download the ground truth mesh file from the RefRef_additional repository
       wget https://huggingface.co/datasets/yinyue27/RefRef_additional/blob/main/mesh_files/single-convex/cube_glass.ply -O ./mesh_files/single-convex/cube_glass.ply
       
+      # Path to the Stage 1 (BG) checkpoint file
+      bg_ckpt=$(ls outputs/bg/r3f_cube_smcvx_cube_bg/r3f/*/nerfstudio_models/step-*.ckpt | sort | tail -n 1)
       # Path to your ground truth mesh file with material name in the file name
       # If multiple meshes, split them with space
       ply_file="./mesh_files/single-convex/cube_glass.ply"
       
-      ns-train r3f --machine.device-type cuda \
+      ns-train r3f --pipeline.stage fg \
+                   --pipeline.bg-checkpoint-path "$bg_ckpt" \
+                   --pipeline.bg-far 15 \
+                   --pipeline.bg-opaque-background True \
+                   --machine.device-type cuda \
                    --machine.num-devices 1 \
                    --project-name oracle \
-                   --pipeline.model.gin-file "configs/refref.gin" \
+                   --experiment-name "oracle_cube_smcvx_cube_fg" \
+                   --pipeline.model.gin-file "configs/refref_fg.gin" \
                    --pipeline.model.background-color random \
-                   --max-num-iterations 25000 \
-                   --output-dir "outputs" \
+                   --max-num-iterations 10000 \
+                   --output-dir "outputs/fg" \
                    --vis wandb \
                refref-data \
                    --scene-name "cube_smcvx_cube" \
@@ -208,8 +250,8 @@ This repository provides the RefRef dataset and benchmark for reconstructing ref
 
 ### 📊 Evaluate an Optimized Scene
    ```bash
-   # Path to your output checkpoint folder
-   config_path=./outputs/.../config.yml  # Path to your output config file
+   # Path to your Stage 2 (FG) output checkpoint folder
+   config_path=./outputs/fg/.../config.yml  # Path to your output config file
    output_path=./outputs/.../output.json  # Path to your output json file
    output_img_dir=./outputs/.../output_images  # Path to your output image folder
    ns-eval --load-config $config_path \
